@@ -1,5 +1,5 @@
 use crate::{
-    chunk::{Chunk, OpCode, Value},
+    chunk::{Chunk, Operation, Value},
     error::LoxError,
 };
 
@@ -23,19 +23,19 @@ impl Vm {
     pub(crate) fn run(&mut self) -> Result<(), LoxError> {
         loop {
             match self.read_op() {
-                OpCode::Constant(index) => {
+                Operation::Constant(index) => {
                     let constant = self.chunk.read_constant(index);
                     self.push(constant);
                 }
-                OpCode::Add => self.binary_op(|a, b| a + b),
-                OpCode::Subtract => self.binary_op(|a, b| a - b),
-                OpCode::Multiply => self.binary_op(|a, b| a * b),
-                OpCode::Divide => self.binary_op(|a, b| a / b),
-                OpCode::Negate => {
+                Operation::Add => self.binary_op(|a, b| a + b),
+                Operation::Subtract => self.binary_op(|a, b| a - b),
+                Operation::Multiply => self.binary_op(|a, b| a * b),
+                Operation::Divide => self.binary_op(|a, b| a / b),
+                Operation::Negate => {
                     let val = -self.pop();
                     self.push(val)
                 }
-                OpCode::Return => {
+                Operation::Return => {
                     println!("{:?}", self.pop());
                     return Ok(());
                 }
@@ -57,7 +57,7 @@ impl Vm {
         self.stack.pop().expect("empty stack")
     }
 
-    fn read_op(&mut self) -> OpCode {
+    fn read_op(&mut self) -> Operation {
         let op = self.chunk.read(self.ip);
         self.ip += 1;
         op

@@ -1,5 +1,5 @@
 use crate::{
-    chunk::{Chunk, OpCode},
+    chunk::{Chunk, Operation},
     vm::Vm,
 };
 
@@ -11,19 +11,19 @@ fn main() {
     let mut chunk = Chunk::new();
 
     let constant = chunk.add_constant(1.2);
-    chunk.write(OpCode::Constant(constant.try_into().unwrap()), 123);
+    chunk.write(Operation::Constant(constant.try_into().unwrap()), 123);
 
     let constant = chunk.add_constant(3.4);
-    chunk.write(OpCode::Constant(constant.try_into().unwrap()), 123);
+    chunk.write(Operation::Constant(constant.try_into().unwrap()), 123);
 
-    chunk.write(OpCode::Add, 123);
+    chunk.write(Operation::Add, 123);
 
     let constant = chunk.add_constant(5.6);
-    chunk.write(OpCode::Constant(constant.try_into().unwrap()), 123);
+    chunk.write(Operation::Constant(constant.try_into().unwrap()), 123);
 
-    chunk.write(OpCode::Divide, 123);
-    chunk.write(OpCode::Negate, 123);
-    chunk.write(OpCode::Return, 123);
+    chunk.write(Operation::Divide, 123);
+    chunk.write(Operation::Negate, 123);
+    chunk.write(Operation::Return, 123);
     println!("{:?}", chunk);
 
     Vm::new(chunk).run();

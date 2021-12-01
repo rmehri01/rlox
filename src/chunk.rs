@@ -1,7 +1,7 @@
 pub(crate) type Value = f64;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum OpCode {
+pub(crate) enum Operation {
     Constant(u8),
     Add,
     Subtract,
@@ -13,7 +13,7 @@ pub(crate) enum OpCode {
 
 #[derive(Debug)]
 pub(crate) struct Chunk {
-    code: Vec<OpCode>,
+    code: Vec<Operation>,
     constants: Vec<Value>,
     lines: Vec<usize>,
 }
@@ -27,12 +27,12 @@ impl Chunk {
         }
     }
 
-    pub(crate) fn read(&self, index: usize) -> OpCode {
+    pub(crate) fn read(&self, index: usize) -> Operation {
         self.code[index]
     }
 
-    pub(crate) fn write(&mut self, op_code: OpCode, line: usize) {
-        self.code.push(op_code);
+    pub(crate) fn write(&mut self, operation: Operation, line: usize) {
+        self.code.push(operation);
         self.lines.push(line);
     }
 
