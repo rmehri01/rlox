@@ -1,30 +1,65 @@
-use crate::{
-    chunk::{Chunk, Operation},
-    vm::Vm,
+use std::{
+    env, fs,
+    io::{self, Write},
+    process,
 };
 
+use chunk::Chunk;
+use error::LoxError;
+
+use crate::vm::Vm;
+
 mod chunk;
+mod compiler;
 mod error;
+mod scanner;
 mod vm;
 
 fn main() {
-    let mut chunk = Chunk::new();
+    let args: Vec<String> = env::args().collect();
+    let mut vm = Vm::new(Chunk::new());
 
-    let constant = chunk.add_constant(1.2);
-    chunk.write(Operation::Constant(constant.try_into().unwrap()), 123);
+    match args.len() {
+        1 => repl(&mut vm),
+        2 => run_file(&mut vm, &args[1]),
+        _ => {
+            eprintln!("Usage: rlox [path]");
+            process::exit(64);
+        }
+    }
+}
 
-    let constant = chunk.add_constant(3.4);
-    chunk.write(Operation::Constant(constant.try_into().unwrap()), 123);
+fn repl(vm: &mut Vm) {
+    loop {
+        print!("> ");
+        io::stdout().flush().unwrap();
 
-    chunk.write(Operation::Add, 123);
+        let mut line = String::new();
+        io::stdin()
+            .read_line(&mut line)
+            .expect("Unable to read line from the REPL");
 
-    let constant = chunk.add_constant(5.6);
-    chunk.write(Operation::Constant(constant.try_into().unwrap()), 123);
+        if line.is_empty() {
+            break;
+        }
 
-    chunk.write(Operation::Divide, 123);
-    chunk.write(Operation::Negate, 123);
-    chunk.write(Operation::Return, 123);
-    println!("{:?}", chunk);
+        vm.interpret(&line);
+    }
+}
 
-    Vm::new(chunk).run();
+fn run_file(vm: &mut Vm, path: &str) {
+    let code = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) => {
+            eprint!("Unable to read file {}: {}", path, error);
+            process::exit(74);
+        }
+    };
+
+    if let Err(error) = vm.interpret(&code) {
+        match error {
+            LoxError::CompileError => process::exit(65),
+            LoxError::RuntimeError => process::exit(70),
+        }
+    }
 }

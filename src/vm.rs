@@ -1,5 +1,6 @@
 use crate::{
     chunk::{Chunk, Operation, Value},
+    compiler,
     error::LoxError,
 };
 
@@ -20,6 +21,11 @@ impl Vm {
         }
     }
 
+    pub(crate) fn interpret(&mut self, code: &str) -> Result<(), LoxError> {
+        compiler::compile(code);
+        Ok(())
+    }
+
     pub(crate) fn run(&mut self) -> Result<(), LoxError> {
         loop {
             match self.read_op() {
@@ -33,7 +39,7 @@ impl Vm {
                 Operation::Divide => self.binary_op(|a, b| a / b),
                 Operation::Negate => {
                     let val = -self.pop();
-                    self.push(val)
+                    self.push(val);
                 }
                 Operation::Return => {
                     println!("{:?}", self.pop());
@@ -46,7 +52,7 @@ impl Vm {
     pub(crate) fn binary_op(&mut self, op: fn(f64, f64) -> f64) {
         let b = self.pop();
         let a = self.pop();
-        self.push(op(a, b))
+        self.push(op(a, b));
     }
 
     fn push(&mut self, value: Value) {
