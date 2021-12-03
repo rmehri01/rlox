@@ -118,11 +118,11 @@ impl<'code> Parser<'code> {
             ),
             (
                 TokenType::Bang,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(Some(Parser::unary), None, Precedence::None),
             ),
             (
                 TokenType::BangEqual,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(None, Some(Parser::binary), Precedence::Equality),
             ),
             (
                 TokenType::Equal,
@@ -130,23 +130,23 @@ impl<'code> Parser<'code> {
             ),
             (
                 TokenType::EqualEqual,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(None, Some(Parser::binary), Precedence::Equality),
             ),
             (
                 TokenType::Greater,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison),
             ),
             (
                 TokenType::GreaterEqual,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison),
             ),
             (
                 TokenType::Less,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison),
             ),
             (
                 TokenType::LessEqual,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison),
             ),
             (
                 TokenType::Identifier,
@@ -171,12 +171,15 @@ impl<'code> Parser<'code> {
             ),
             (
                 TokenType::False,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(Some(Parser::number), None, Precedence::None),
             ),
             (TokenType::For, ParseRule::new(None, None, Precedence::None)),
             (TokenType::Fun, ParseRule::new(None, None, Precedence::None)),
             (TokenType::If, ParseRule::new(None, None, Precedence::None)),
-            (TokenType::Nil, ParseRule::new(None, None, Precedence::None)),
+            (
+                TokenType::Nil,
+                ParseRule::new(Some(Parser::literal), None, Precedence::None),
+            ),
             (TokenType::Or, ParseRule::new(None, None, Precedence::None)),
             (
                 TokenType::Print,
@@ -196,7 +199,7 @@ impl<'code> Parser<'code> {
             ),
             (
                 TokenType::True,
-                ParseRule::new(None, None, Precedence::None),
+                ParseRule::new(Some(Parser::literal), None, Precedence::None),
             ),
             (TokenType::Var, ParseRule::new(None, None, Precedence::None)),
             (
@@ -232,6 +235,11 @@ impl<'code> Parser<'code> {
         } else {
             Ok(self.chunk)
         }
+    }
+
+    fn emit_ops(&mut self, op1: Operation, op2: Operation) {
+        self.chunk.write(op1, self.previous.line);
+        self.chunk.write(op2, self.previous.line);
     }
 
     fn emit_op(&mut self, operation: Operation) {
@@ -298,6 +306,15 @@ impl<'code> Parser<'code> {
         self.emit_constant(Value::Number(value));
     }
 
+    fn literal(&mut self) {
+        match self.previous.kind {
+            TokenType::False => self.emit_op(Operation::False),
+            TokenType::Nil => self.emit_op(Operation::Nil),
+            TokenType::True => self.emit_op(Operation::True),
+            _ => panic!("Invalid literal."),
+        }
+    }
+
     fn make_constant(&mut self, value: Value) -> u8 {
         let constant = self.chunk.add_constant(value);
         match u8::try_from(constant) {
@@ -320,6 +337,7 @@ impl<'code> Parser<'code> {
         self.parse_precedence(Precedence::Unary);
 
         match operator_kind {
+            TokenType::Bang => self.emit_op(Operation::Not),
             TokenType::Minus => self.emit_op(Operation::Negate),
             _ => panic!("Invalid unary operator."),
         }
@@ -352,6 +370,12 @@ impl<'code> Parser<'code> {
         self.parse_precedence(rule.precedence.next());
 
         match operator_kind {
+            TokenType::BangEqual => self.emit_ops(Operation::Equal, Operation::Not),
+            TokenType::EqualEqual => self.emit_op(Operation::Equal),
+            TokenType::Greater => self.emit_op(Operation::Greater),
+            TokenType::GreaterEqual => self.emit_ops(Operation::Less, Operation::Not),
+            TokenType::Less => self.emit_op(Operation::Less),
+            TokenType::LessEqual => self.emit_ops(Operation::Greater, Operation::Not),
             TokenType::Plus => self.emit_op(Operation::Add),
             TokenType::Minus => self.emit_op(Operation::Subtract),
             TokenType::Star => self.emit_op(Operation::Multiply),

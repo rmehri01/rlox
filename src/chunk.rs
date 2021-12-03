@@ -1,17 +1,34 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Value {
     Bool(bool),
     Nil,
     Number(f64),
 }
 
+impl Value {
+    pub(crate) fn is_falsey(&self) -> bool {
+        match self {
+            Value::Bool(value) => !value,
+            Value::Nil => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Operation {
     Constant(u8),
+    Nil,
+    True,
+    False,
+    Equal,
+    Greater,
+    Less,
     Add,
     Subtract,
     Multiply,
     Divide,
+    Not,
     Negate,
     Return,
 }

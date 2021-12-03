@@ -38,9 +38,23 @@ impl Vm {
                     self.push(constant);
                 }
                 Operation::Add => self.binary_op(|a, b| a + b, Value::Number)?,
+                Operation::Nil => self.push(Value::Nil),
+                Operation::True => self.push(Value::Bool(true)),
+                Operation::False => self.push(Value::Bool(false)),
+                Operation::Equal => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(Value::Bool(a == b));
+                }
+                Operation::Greater => self.binary_op(|a, b| a > b, Value::Bool)?,
+                Operation::Less => self.binary_op(|a, b| a < b, Value::Bool)?,
                 Operation::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
                 Operation::Multiply => self.binary_op(|a, b| a * b, Value::Number)?,
                 Operation::Divide => self.binary_op(|a, b| a / b, Value::Number)?,
+                Operation::Not => {
+                    let value = self.pop();
+                    self.push(Value::Bool(value.is_falsey()));
+                }
                 Operation::Negate => {
                     if let Value::Number(value) = self.peek(0) {
                         self.pop();
