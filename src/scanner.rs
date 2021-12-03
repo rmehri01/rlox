@@ -214,11 +214,11 @@ fn is_alpha(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Token<'code> {
     pub(crate) kind: TokenType,
-    lexeme: &'code str,
-    line: usize,
+    pub(crate) lexeme: &'code str,
+    pub(crate) line: usize,
 }
 
 impl<'code> Token<'code> {
@@ -227,7 +227,7 @@ impl<'code> Token<'code> {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
 pub(crate) enum TokenType {
     // Single-character tokens.
     LeftParen,

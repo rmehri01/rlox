@@ -1,6 +1,6 @@
 use crate::{
     chunk::{Chunk, Operation, Value},
-    compiler,
+    compiler::Parser,
     error::LoxError,
 };
 
@@ -22,8 +22,12 @@ impl Vm {
     }
 
     pub(crate) fn interpret(&mut self, code: &str) -> Result<(), LoxError> {
-        compiler::compile(code);
-        Ok(())
+        let chunk = Parser::new(code).compile()?;
+
+        self.chunk = chunk;
+        self.ip = 0;
+
+        self.run()
     }
 
     pub(crate) fn run(&mut self) -> Result<(), LoxError> {
