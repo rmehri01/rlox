@@ -290,9 +290,12 @@ impl<'code> Parser<'code> {
     }
 
     fn number(&mut self) {
-        let value = self.previous.lexeme.parse().unwrap();
-        let index = self.make_constant(value);
-        self.emit_op(Operation::Constant(index))
+        let value: f64 = self
+            .previous
+            .lexeme
+            .parse()
+            .expect("Parsed value is not a double");
+        self.emit_constant(Value::Number(value));
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
@@ -359,5 +362,10 @@ impl<'code> Parser<'code> {
 
     fn get_rule(&self, kind: TokenType) -> ParseRule<'code> {
         self.rules[&kind]
+    }
+
+    fn emit_constant(&mut self, value: Value) {
+        let index = self.make_constant(value);
+        self.emit_op(Operation::Constant(index))
     }
 }

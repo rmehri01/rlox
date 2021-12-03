@@ -37,13 +37,17 @@ impl Vm {
                     let constant = self.chunk.read_constant(index);
                     self.push(constant);
                 }
-                Operation::Add => self.binary_op(|a, b| a + b),
-                Operation::Subtract => self.binary_op(|a, b| a - b),
-                Operation::Multiply => self.binary_op(|a, b| a * b),
-                Operation::Divide => self.binary_op(|a, b| a / b),
+                Operation::Add => self.binary_op(|a, b| a + b, Value::Number)?,
+                Operation::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
+                Operation::Multiply => self.binary_op(|a, b| a * b, Value::Number)?,
+                Operation::Divide => self.binary_op(|a, b| a / b, Value::Number)?,
                 Operation::Negate => {
-                    let val = -self.pop();
-                    self.push(val);
+                    if let Value::Number(value) = self.peek(0) {
+                        self.pop();
+                        self.push(Value::Number(-value));
+                    } else {
+                        return self.runtime_error("Operand must be a number.");
+                    }
                 }
                 Operation::Return => {
                     println!("{:?}", self.pop());
@@ -53,10 +57,20 @@ impl Vm {
         }
     }
 
-    pub(crate) fn binary_op(&mut self, op: fn(f64, f64) -> f64) {
+    pub(crate) fn binary_op<T>(
+        &mut self,
+        op: fn(f64, f64) -> T,
+        to_val: fn(T) -> Value,
+    ) -> Result<(), LoxError> {
         let b = self.pop();
         let a = self.pop();
-        self.push(op(a, b));
+        match (b, a) {
+            (Value::Number(b_val), Value::Number(a_val)) => {
+                self.push(to_val(op(a_val, b_val)));
+                Ok(())
+            }
+            _ => self.runtime_error("Operands must be numbers."),
+        }
     }
 
     fn push(&mut self, value: Value) {
@@ -71,5 +85,16 @@ impl Vm {
         let op = self.chunk.read(self.ip);
         self.ip += 1;
         op
+    }
+
+    fn peek(&self, distance: usize) -> Value {
+        let size = self.stack.len();
+        self.stack[size - 1 - distance]
+    }
+
+    fn runtime_error(&self, message: &str) -> Result<(), LoxError> {
+        eprintln!("{}", message);
+        let line = self.chunk.lines[self.ip - 1];
+        Err(LoxError::RuntimeError)
     }
 }

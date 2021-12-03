@@ -1,4 +1,9 @@
-pub(crate) type Value = f64;
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Value {
+    Bool(bool),
+    Nil,
+    Number(f64),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Operation {
@@ -15,7 +20,7 @@ pub(crate) enum Operation {
 pub(crate) struct Chunk {
     code: Vec<Operation>,
     constants: Vec<Value>,
-    lines: Vec<usize>,
+    pub(crate) lines: Vec<usize>,
 }
 
 impl Chunk {
