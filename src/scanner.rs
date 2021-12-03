@@ -139,7 +139,7 @@ impl<'code> Scanner<'code> {
             self.advance();
         }
 
-        if self.peek() == b'.' && is_digit(self.peek()) {
+        if self.peek() == b'.' && is_digit(self.peek_next()) {
             self.advance();
 
             while is_digit(self.peek()) {
