@@ -1,5 +1,5 @@
 use crate::{
-    chunk::{Chunk, Operation, Value},
+    chunk::{Chunk, Op, Value},
     compiler::Parser,
     error::LoxError,
 };
@@ -33,29 +33,29 @@ impl Vm {
     pub(crate) fn run(&mut self) -> Result<(), LoxError> {
         loop {
             match self.read_op() {
-                Operation::Constant(index) => {
+                Op::Constant(index) => {
                     let constant = self.chunk.read_constant(index);
                     self.push(constant);
                 }
-                Operation::Add => self.binary_op(|a, b| a + b, Value::Number)?,
-                Operation::Nil => self.push(Value::Nil),
-                Operation::True => self.push(Value::Bool(true)),
-                Operation::False => self.push(Value::Bool(false)),
-                Operation::Equal => {
+                Op::Add => self.binary_op(|a, b| a + b, Value::Number)?,
+                Op::Nil => self.push(Value::Nil),
+                Op::True => self.push(Value::Bool(true)),
+                Op::False => self.push(Value::Bool(false)),
+                Op::Equal => {
                     let b = self.pop();
                     let a = self.pop();
                     self.push(Value::Bool(a == b));
                 }
-                Operation::Greater => self.binary_op(|a, b| a > b, Value::Bool)?,
-                Operation::Less => self.binary_op(|a, b| a < b, Value::Bool)?,
-                Operation::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
-                Operation::Multiply => self.binary_op(|a, b| a * b, Value::Number)?,
-                Operation::Divide => self.binary_op(|a, b| a / b, Value::Number)?,
-                Operation::Not => {
+                Op::Greater => self.binary_op(|a, b| a > b, Value::Bool)?,
+                Op::Less => self.binary_op(|a, b| a < b, Value::Bool)?,
+                Op::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
+                Op::Multiply => self.binary_op(|a, b| a * b, Value::Number)?,
+                Op::Divide => self.binary_op(|a, b| a / b, Value::Number)?,
+                Op::Not => {
                     let value = self.pop();
                     self.push(Value::Bool(value.is_falsey()));
                 }
-                Operation::Negate => {
+                Op::Negate => {
                     if let Value::Number(value) = self.peek(0) {
                         self.pop();
                         self.push(Value::Number(-value));
@@ -63,7 +63,7 @@ impl Vm {
                         return self.runtime_error("Operand must be a number.");
                     }
                 }
-                Operation::Return => {
+                Op::Return => {
                     println!("{:?}", self.pop());
                     return Ok(());
                 }
@@ -95,7 +95,7 @@ impl Vm {
         self.stack.pop().expect("empty stack")
     }
 
-    fn read_op(&mut self) -> Operation {
+    fn read_op(&mut self) -> Op {
         let op = self.chunk.read(self.ip);
         self.ip += 1;
         op

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    chunk::{Chunk, Operation, Value},
+    chunk::{Chunk, Op, Value},
     error::LoxError,
     scanner::{Scanner, Token, TokenType},
 };
@@ -229,7 +229,7 @@ impl<'code> Parser<'code> {
         self.expression();
         self.consume(TokenType::Eof, "Expect end of expression");
 
-        self.emit_op(Operation::Return);
+        self.emit_op(Op::Return);
         if self.had_error {
             Err(LoxError::CompileError)
         } else {
@@ -237,13 +237,13 @@ impl<'code> Parser<'code> {
         }
     }
 
-    fn emit_ops(&mut self, op1: Operation, op2: Operation) {
+    fn emit_ops(&mut self, op1: Op, op2: Op) {
         self.chunk.write(op1, self.previous.line);
         self.chunk.write(op2, self.previous.line);
     }
 
-    fn emit_op(&mut self, operation: Operation) {
-        self.chunk.write(operation, self.previous.line);
+    fn emit_op(&mut self, op: Op) {
+        self.chunk.write(op, self.previous.line);
     }
 
     fn advance(&mut self) {
@@ -308,9 +308,9 @@ impl<'code> Parser<'code> {
 
     fn literal(&mut self) {
         match self.previous.kind {
-            TokenType::False => self.emit_op(Operation::False),
-            TokenType::Nil => self.emit_op(Operation::Nil),
-            TokenType::True => self.emit_op(Operation::True),
+            TokenType::False => self.emit_op(Op::False),
+            TokenType::Nil => self.emit_op(Op::Nil),
+            TokenType::True => self.emit_op(Op::True),
             _ => panic!("Invalid literal."),
         }
     }
@@ -337,8 +337,8 @@ impl<'code> Parser<'code> {
         self.parse_precedence(Precedence::Unary);
 
         match operator_kind {
-            TokenType::Bang => self.emit_op(Operation::Not),
-            TokenType::Minus => self.emit_op(Operation::Negate),
+            TokenType::Bang => self.emit_op(Op::Not),
+            TokenType::Minus => self.emit_op(Op::Negate),
             _ => panic!("Invalid unary operator."),
         }
     }
@@ -370,16 +370,16 @@ impl<'code> Parser<'code> {
         self.parse_precedence(rule.precedence.next());
 
         match operator_kind {
-            TokenType::BangEqual => self.emit_ops(Operation::Equal, Operation::Not),
-            TokenType::EqualEqual => self.emit_op(Operation::Equal),
-            TokenType::Greater => self.emit_op(Operation::Greater),
-            TokenType::GreaterEqual => self.emit_ops(Operation::Less, Operation::Not),
-            TokenType::Less => self.emit_op(Operation::Less),
-            TokenType::LessEqual => self.emit_ops(Operation::Greater, Operation::Not),
-            TokenType::Plus => self.emit_op(Operation::Add),
-            TokenType::Minus => self.emit_op(Operation::Subtract),
-            TokenType::Star => self.emit_op(Operation::Multiply),
-            TokenType::Slash => self.emit_op(Operation::Divide),
+            TokenType::BangEqual => self.emit_ops(Op::Equal, Op::Not),
+            TokenType::EqualEqual => self.emit_op(Op::Equal),
+            TokenType::Greater => self.emit_op(Op::Greater),
+            TokenType::GreaterEqual => self.emit_ops(Op::Less, Op::Not),
+            TokenType::Less => self.emit_op(Op::Less),
+            TokenType::LessEqual => self.emit_ops(Op::Greater, Op::Not),
+            TokenType::Plus => self.emit_op(Op::Add),
+            TokenType::Minus => self.emit_op(Op::Subtract),
+            TokenType::Star => self.emit_op(Op::Multiply),
+            TokenType::Slash => self.emit_op(Op::Divide),
             _ => panic!("Invalid binary operator."),
         }
     }
@@ -390,6 +390,6 @@ impl<'code> Parser<'code> {
 
     fn emit_constant(&mut self, value: Value) {
         let index = self.make_constant(value);
-        self.emit_op(Operation::Constant(index))
+        self.emit_op(Op::Constant(index))
     }
 }

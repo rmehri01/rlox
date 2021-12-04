@@ -16,7 +16,7 @@ impl Value {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Operation {
+pub(crate) enum Op {
     Constant(u8),
     Nil,
     True,
@@ -35,7 +35,7 @@ pub(crate) enum Operation {
 
 #[derive(Debug)]
 pub(crate) struct Chunk {
-    code: Vec<Operation>,
+    code: Vec<Op>,
     constants: Vec<Value>,
     pub(crate) lines: Vec<usize>,
 }
@@ -49,12 +49,12 @@ impl Chunk {
         }
     }
 
-    pub(crate) fn read(&self, index: usize) -> Operation {
+    pub(crate) fn read(&self, index: usize) -> Op {
         self.code[index]
     }
 
-    pub(crate) fn write(&mut self, operation: Operation, line: usize) {
-        self.code.push(operation);
+    pub(crate) fn write(&mut self, op: Op, line: usize) {
+        self.code.push(op);
         self.lines.push(line);
     }
 
