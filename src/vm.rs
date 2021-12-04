@@ -109,6 +109,7 @@ impl Vm {
     fn runtime_error(&self, message: &str) -> Result<(), LoxError> {
         eprintln!("{}", message);
         let line = self.chunk.lines[self.ip - 1];
+        eprintln!("[line {}] in script", line);
         Err(LoxError::RuntimeError)
     }
 }
