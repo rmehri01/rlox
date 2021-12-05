@@ -157,6 +157,12 @@ impl<'code> Parser<'code> {
         }
     }
 
+    fn string(&mut self) {
+        let lexeme = self.previous.lexeme;
+        let value = lexeme[1..lexeme.len() - 1].to_string();
+        self.emit_constant(Value::String(value));
+    }
+
     fn make_constant(&mut self, value: Value) -> u8 {
         let constant = self.chunk.add_constant(value);
         match u8::try_from(constant) {
@@ -329,7 +335,7 @@ impl<'code> Parser<'code> {
                 precedence: Precedence::None,
             },
             TokenType::String => ParseRule {
-                prefix: None,
+                prefix: Some(Parser::string),
                 infix: None,
                 precedence: Precedence::None,
             },

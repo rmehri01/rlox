@@ -37,7 +37,17 @@ impl Vm {
                     let constant = self.chunk.read_constant(index);
                     self.push(constant);
                 }
-                Op::Add => self.binary_op(|a, b| a + b, Value::Number)?,
+                Op::Add => {
+                    let (b, a) = (self.pop(), self.pop());
+                    match (a, b) {
+                        (Value::String(a), Value::String(b)) => self.push(Value::String(a + &b)),
+                        (Value::Number(a), Value::Number(b)) => self.push(Value::Number(a + b)),
+                        _ => {
+                            return self
+                                .runtime_error("Operands must be two numbers or two strings.");
+                        }
+                    };
+                }
                 Op::Nil => self.push(Value::Nil),
                 Op::True => self.push(Value::Bool(true)),
                 Op::False => self.push(Value::Bool(false)),
@@ -57,6 +67,7 @@ impl Vm {
                 }
                 Op::Negate => {
                     if let Value::Number(value) = self.peek(0) {
+                        let value = value.to_owned();
                         self.pop();
                         self.push(Value::Number(-value));
                     } else {
@@ -101,9 +112,9 @@ impl Vm {
         op
     }
 
-    fn peek(&self, distance: usize) -> Value {
+    fn peek(&self, distance: usize) -> &Value {
         let size = self.stack.len();
-        self.stack[size - 1 - distance]
+        &self.stack[size - 1 - distance]
     }
 
     fn runtime_error(&self, message: &str) -> Result<(), LoxError> {
