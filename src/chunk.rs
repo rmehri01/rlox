@@ -1,9 +1,11 @@
-#[derive(Debug, Clone, PartialEq)]
+use crate::interner::StrId;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Value {
     Bool(bool),
     Nil,
     Number(f64),
-    String(String),
+    String(StrId),
 }
 
 impl Value {
@@ -60,8 +62,7 @@ impl Chunk {
     }
 
     pub(crate) fn read_constant(&self, index: u8) -> Value {
-        // TODO: do we need to clone this?
-        self.constants[index as usize].clone()
+        self.constants[index as usize]
     }
 
     pub(crate) fn add_constant(&mut self, value: Value) -> usize {

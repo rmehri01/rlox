@@ -1,6 +1,7 @@
 use crate::{
     chunk::{Chunk, Op, Value},
     error::LoxError,
+    interner::Interner,
     scanner::{Scanner, Token, TokenType},
 };
 
@@ -37,28 +38,30 @@ impl Precedence {
     }
 }
 
-struct ParseRule<'code> {
-    prefix: Option<ParseFn<'code>>,
-    infix: Option<ParseFn<'code>>,
+struct ParseRule<'intern, 'code> {
+    prefix: Option<ParseFn<'intern, 'code>>,
+    infix: Option<ParseFn<'intern, 'code>>,
     precedence: Precedence,
 }
 
-type ParseFn<'code> = fn(&mut Parser<'code>);
+type ParseFn<'intern, 'code> = fn(&mut Parser<'intern, 'code>);
 
-pub(crate) struct Parser<'code> {
+pub(crate) struct Parser<'intern, 'code> {
     chunk: Chunk,
     scanner: Scanner<'code>,
+    interner: &'code mut Interner<'intern>,
     current: Token<'code>,
     previous: Token<'code>,
     had_error: bool,
     panic_mode: bool,
 }
 
-impl<'code> Parser<'code> {
-    pub(crate) fn new(code: &'code str) -> Self {
+impl<'intern, 'code> Parser<'intern, 'code> {
+    pub(crate) fn new(interner: &'code mut Interner<'intern>, code: &'code str) -> Self {
         Self {
             chunk: Chunk::new(),
             scanner: Scanner::new(code),
+            interner,
             current: Token::new(TokenType::Error, "", 0),
             previous: Token::new(TokenType::Error, "", 0),
             had_error: false,
@@ -159,8 +162,9 @@ impl<'code> Parser<'code> {
 
     fn string(&mut self) {
         let lexeme = self.previous.lexeme;
-        let value = lexeme[1..lexeme.len() - 1].to_string();
-        self.emit_constant(Value::String(value));
+        let value = &lexeme[1..lexeme.len() - 1];
+        let str_id = self.interner.intern(value);
+        self.emit_constant(Value::String(str_id));
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
@@ -232,7 +236,7 @@ impl<'code> Parser<'code> {
         }
     }
 
-    fn get_rule(kind: TokenType) -> ParseRule<'code> {
+    fn get_rule(kind: TokenType) -> ParseRule<'intern, 'code> {
         match kind {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(Parser::grouping),

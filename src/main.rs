@@ -6,18 +6,23 @@ use std::{
 
 use chunk::Chunk;
 use error::LoxError;
+use interner::Interner;
+use typed_arena::Arena;
 
 use crate::vm::Vm;
 
 mod chunk;
 mod compiler;
 mod error;
+mod interner;
 mod scanner;
 mod vm;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut vm = Vm::new(Chunk::new());
+    let arena = Arena::new();
+    let interner = Interner::new(&arena);
+    let mut vm = Vm::new(interner, Chunk::new());
 
     match args.len() {
         1 => repl(&mut vm),

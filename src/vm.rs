@@ -2,27 +2,30 @@ use crate::{
     chunk::{Chunk, Op, Value},
     compiler::Parser,
     error::LoxError,
+    interner::Interner,
 };
 
-pub(crate) struct Vm {
+pub(crate) struct Vm<'intern> {
     chunk: Chunk,
     stack: Vec<Value>,
+    interner: Interner<'intern>,
     ip: usize,
 }
 
-impl Vm {
+impl<'intern, 'code> Vm<'intern> {
     const CAPACITY: usize = 256;
 
-    pub(crate) fn new(chunk: Chunk) -> Self {
+    pub(crate) fn new(interner: Interner<'intern>, chunk: Chunk) -> Self {
         Self {
             chunk,
             stack: Vec::with_capacity(Vm::CAPACITY),
+            interner,
             ip: 0,
         }
     }
 
-    pub(crate) fn interpret(&mut self, code: &str) -> Result<(), LoxError> {
-        let chunk = Parser::new(code).compile()?;
+    pub(crate) fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
+        let chunk = Parser::new(&mut self.interner, code).compile()?;
 
         self.chunk = chunk;
         self.ip = 0;
@@ -40,7 +43,13 @@ impl Vm {
                 Op::Add => {
                     let (b, a) = (self.pop(), self.pop());
                     match (a, b) {
-                        (Value::String(a), Value::String(b)) => self.push(Value::String(a + &b)),
+                        (Value::String(a), Value::String(b)) => {
+                            let str_a = self.interner.lookup(a);
+                            let str_b = self.interner.lookup(b);
+                            let result = str_a.to_owned() + str_b;
+                            let result = self.interner.intern(&result);
+                            self.push(Value::String(result));
+                        }
                         (Value::Number(a), Value::Number(b)) => self.push(Value::Number(a + b)),
                         _ => {
                             return self
