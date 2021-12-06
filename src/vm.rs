@@ -1,14 +1,17 @@
+use std::collections::HashMap;
+
 use crate::{
     chunk::{Chunk, Op, Value},
     compiler::Parser,
     error::LoxError,
-    interner::Interner,
+    interner::{Interner, StrId},
 };
 
 pub(crate) struct Vm<'intern> {
     chunk: Chunk,
     stack: Vec<Value>,
     interner: Interner<'intern>,
+    globals: HashMap<StrId, Value>,
     ip: usize,
 }
 
@@ -19,6 +22,7 @@ impl<'intern, 'code> Vm<'intern> {
         Self {
             chunk,
             stack: Vec::with_capacity(Vm::CAPACITY),
+            globals: HashMap::new(),
             interner,
             ip: 0,
         }
@@ -63,6 +67,32 @@ impl<'intern, 'code> Vm<'intern> {
                 Op::Pop => {
                     self.pop();
                 }
+                Op::GetGlobal(index) => {
+                    let str_id = self.chunk.read_string(index);
+                    match self.globals.get(&str_id) {
+                        Some(&value) => self.push(value),
+                        None => {
+                            let name = self.interner.lookup(str_id);
+                            let msg = format!("Undefined variable '{}'.", name);
+                            return self.runtime_error(&msg);
+                        }
+                    }
+                }
+                Op::DefineGlobal(index) => {
+                    let str_id = self.chunk.read_string(index);
+                    let name = self.pop();
+                    self.globals.insert(str_id, name);
+                }
+                Op::SetGlobal(index) => {
+                    let str_id = self.chunk.read_string(index);
+                    let value = self.peek(0);
+                    if self.globals.insert(str_id, value).is_none() {
+                        self.globals.remove(&str_id);
+                        let name = self.interner.lookup(str_id);
+                        let msg = format!("Undefined variable '{}'.", name);
+                        return self.runtime_error(&msg);
+                    }
+                }
                 Op::Equal => {
                     let b = self.pop();
                     let a = self.pop();
@@ -79,7 +109,6 @@ impl<'intern, 'code> Vm<'intern> {
                 }
                 Op::Negate => {
                     if let Value::Number(value) = self.peek(0) {
-                        let value = value.to_owned();
                         self.pop();
                         self.push(Value::Number(-value));
                     } else {
@@ -132,9 +161,9 @@ impl<'intern, 'code> Vm<'intern> {
         op
     }
 
-    fn peek(&self, distance: usize) -> &Value {
+    fn peek(&self, distance: usize) -> Value {
         let size = self.stack.len();
-        &self.stack[size - 1 - distance]
+        self.stack[size - 1 - distance]
     }
 
     fn runtime_error(&self, message: &str) -> Result<(), LoxError> {

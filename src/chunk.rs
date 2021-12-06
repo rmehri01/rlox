@@ -25,6 +25,9 @@ pub(crate) enum Op {
     True,
     False,
     Pop,
+    GetGlobal(u8),
+    DefineGlobal(u8),
+    SetGlobal(u8),
     Equal,
     Greater,
     Less,
@@ -70,5 +73,13 @@ impl Chunk {
     pub(crate) fn add_constant(&mut self, value: Value) -> usize {
         self.constants.push(value);
         self.constants.len() - 1
+    }
+
+    pub fn read_string(&self, index: u8) -> StrId {
+        if let Value::String(s) = self.read_constant(index) {
+            s
+        } else {
+            panic!("Constant is not string.")
+        }
     }
 }

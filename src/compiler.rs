@@ -44,7 +44,19 @@ struct ParseRule<'intern, 'code> {
     precedence: Precedence,
 }
 
-type ParseFn<'intern, 'code> = fn(&mut Parser<'intern, 'code>);
+enum ParseFn<'intern, 'code> {
+    Normal(fn(&mut Parser<'intern, 'code>)),
+    Assign(fn(&mut Parser<'intern, 'code>, bool)),
+}
+
+impl<'intern, 'code> ParseFn<'intern, 'code> {
+    fn apply(self, parser: &mut Parser<'intern, 'code>, can_assign: bool) {
+        match self {
+            ParseFn::Normal(f) => f(parser),
+            ParseFn::Assign(f) => f(parser, can_assign),
+        }
+    }
+}
 
 pub(crate) struct Parser<'intern, 'code> {
     chunk: Chunk,
@@ -169,6 +181,10 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         self.emit_constant(Value::String(str_id));
     }
 
+    fn variable(&mut self, can_assign: bool) {
+        self.named_variable(self.previous, can_assign);
+    }
+
     fn make_constant(&mut self, value: Value) -> u8 {
         let constant = self.chunk.add_constant(value);
         match u8::try_from(constant) {
@@ -201,9 +217,10 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         self.advance();
 
         let prefix_rule = Parser::get_rule(self.previous.kind).prefix;
+        let can_assign = precedence <= Precedence::Assignment;
 
         match prefix_rule {
-            Some(f) => f(self),
+            Some(f) => f.apply(self, can_assign),
             None => {
                 self.error("Expect expression.");
                 return;
@@ -213,7 +230,11 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         while precedence <= Parser::get_rule(self.current.kind).precedence {
             self.advance();
             let infix_rule = Parser::get_rule(self.previous.kind).infix.unwrap();
-            infix_rule(self);
+            infix_rule.apply(self, can_assign);
+        }
+
+        if can_assign && self.matches(TokenType::Equal) {
+            self.error("Invalid assignment target.")
         }
     }
 
@@ -241,7 +262,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn get_rule(kind: TokenType) -> ParseRule<'intern, 'code> {
         match kind {
             TokenType::LeftParen => ParseRule {
-                prefix: Some(Parser::grouping),
+                prefix: Some(ParseFn::Normal(Parser::grouping)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -271,13 +292,13 @@ impl<'intern, 'code> Parser<'intern, 'code> {
                 precedence: Precedence::None,
             },
             TokenType::Minus => ParseRule {
-                prefix: Some(Parser::unary),
-                infix: Some(Parser::binary),
+                prefix: Some(ParseFn::Normal(Parser::unary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Term,
             },
             TokenType::Plus => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Term,
             },
             TokenType::Semicolon => ParseRule {
@@ -287,22 +308,22 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             },
             TokenType::Slash => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Factor,
             },
             TokenType::Star => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Factor,
             },
             TokenType::Bang => ParseRule {
-                prefix: Some(Parser::unary),
+                prefix: Some(ParseFn::Normal(Parser::unary)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::BangEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Equality,
             },
             TokenType::Equal => ParseRule {
@@ -312,41 +333,41 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             },
             TokenType::EqualEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Equality,
             },
             TokenType::Greater => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::GreaterEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::Less => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::LessEqual => ParseRule {
                 prefix: None,
-                infix: Some(Parser::binary),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::Identifier => ParseRule {
-                prefix: None,
+                prefix: Some(ParseFn::Assign(Parser::variable)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::String => ParseRule {
-                prefix: Some(Parser::string),
+                prefix: Some(ParseFn::Normal(Parser::string)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::Number => ParseRule {
-                prefix: Some(Parser::number),
+                prefix: Some(ParseFn::Normal(Parser::number)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -366,7 +387,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
                 precedence: Precedence::None,
             },
             TokenType::False => ParseRule {
-                prefix: Some(Parser::number),
+                prefix: Some(ParseFn::Normal(Parser::number)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -386,7 +407,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
                 precedence: Precedence::None,
             },
             TokenType::Nil => ParseRule {
-                prefix: Some(Parser::literal),
+                prefix: Some(ParseFn::Normal(Parser::literal)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -416,7 +437,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
                 precedence: Precedence::None,
             },
             TokenType::True => ParseRule {
-                prefix: Some(Parser::literal),
+                prefix: Some(ParseFn::Normal(Parser::literal)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -449,7 +470,11 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn declaration(&mut self) {
-        self.statement();
+        if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.statement();
+        }
 
         if self.panic_mode {
             self.synchronize();
@@ -506,6 +531,46 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             };
 
             self.advance();
+        }
+    }
+
+    fn var_declaration(&mut self) {
+        let global = self.parse_variable("Expect variable name.");
+
+        if self.matches(TokenType::Equal) {
+            self.expression();
+        } else {
+            self.emit_op(Op::Nil);
+        }
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        );
+
+        self.define_variable(global);
+    }
+
+    fn parse_variable(&mut self, error_message: &str) -> u8 {
+        self.consume(TokenType::Identifier, error_message);
+        self.identifier_constant(self.previous)
+    }
+
+    fn identifier_constant(&mut self, token: Token) -> u8 {
+        let identifier = self.interner.intern(token.lexeme);
+        self.make_constant(Value::String(identifier))
+    }
+
+    fn define_variable(&mut self, index: u8) {
+        self.emit_op(Op::DefineGlobal(index))
+    }
+
+    fn named_variable(&mut self, token: Token, can_assign: bool) {
+        let index = self.identifier_constant(token);
+        if can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_op(Op::SetGlobal(index));
+        } else {
+            self.emit_op(Op::GetGlobal(index));
         }
     }
 }
