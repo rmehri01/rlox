@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use typed_arena::Arena;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct StrId(usize);
 
 pub(crate) struct Interner<'a> {
