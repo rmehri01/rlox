@@ -24,6 +24,7 @@ pub(crate) enum Op {
     Nil,
     True,
     False,
+    Pop,
     Equal,
     Greater,
     Less,
@@ -33,6 +34,7 @@ pub(crate) enum Op {
     Divide,
     Not,
     Negate,
+    Print,
     Return,
 }
 

@@ -60,6 +60,9 @@ impl<'intern, 'code> Vm<'intern> {
                 Op::Nil => self.push(Value::Nil),
                 Op::True => self.push(Value::Bool(true)),
                 Op::False => self.push(Value::Bool(false)),
+                Op::Pop => {
+                    self.pop();
+                }
                 Op::Equal => {
                     let b = self.pop();
                     let a = self.pop();
@@ -83,8 +86,16 @@ impl<'intern, 'code> Vm<'intern> {
                         return self.runtime_error("Operand must be a number.");
                     }
                 }
+                Op::Print => {
+                    // TODO: should use display trait somehow
+                    match self.pop() {
+                        Value::Bool(value) => println!("{}", value),
+                        Value::Nil => println!("nil"),
+                        Value::Number(value) => println!("{}", value),
+                        Value::String(str_id) => println!("{}", self.interner.lookup(str_id)),
+                    };
+                }
                 Op::Return => {
-                    println!("{:?}", self.pop());
                     return Ok(());
                 }
             }

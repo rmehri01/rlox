@@ -48,7 +48,7 @@ fn repl(vm: &mut Vm) {
             break;
         }
 
-        vm.interpret(&line);
+        vm.interpret(&line).ok();
     }
 }
 

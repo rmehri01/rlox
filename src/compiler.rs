@@ -71,8 +71,10 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
     pub(crate) fn compile(mut self) -> Result<Chunk, LoxError> {
         self.advance();
-        self.expression();
-        self.consume(TokenType::Eof, "Expect end of expression");
+
+        while !self.matches(TokenType::Eof) {
+            self.declaration();
+        }
 
         self.emit_op(Op::Return);
         if self.had_error {
@@ -444,5 +446,66 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn emit_constant(&mut self, value: Value) {
         let index = self.make_constant(value);
         self.emit_op(Op::Constant(index))
+    }
+
+    fn declaration(&mut self) {
+        self.statement();
+
+        if self.panic_mode {
+            self.synchronize();
+        }
+    }
+
+    fn statement(&mut self) {
+        if self.matches(TokenType::Print) {
+            self.print_statement();
+        } else {
+            self.expression_statement();
+        }
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        self.emit_op(Op::Print);
+    }
+
+    fn matches(&mut self, kind: TokenType) -> bool {
+        if self.current.kind == kind {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        self.emit_op(Op::Pop);
+    }
+
+    fn synchronize(&mut self) {
+        self.panic_mode = false;
+
+        while self.previous.kind != TokenType::Eof {
+            if self.previous.kind == TokenType::Semicolon {
+                return;
+            }
+
+            match self.current.kind {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return,
+                _ => (),
+            };
+
+            self.advance();
+        }
     }
 }

@@ -101,7 +101,7 @@ impl<'code> Scanner<'code> {
                     self.advance();
                 }
                 b'/' if self.peek_next() == b'/' => {
-                    while self.peek() != b'\n' && !self.is_at_end() {
+                    while !self.is_at_end() && self.peek() != b'\n' {
                         self.advance();
                     }
                 }
@@ -119,7 +119,7 @@ impl<'code> Scanner<'code> {
     }
 
     fn string(&mut self) -> Token<'code> {
-        while self.peek() != b'"' && !self.is_at_end() {
+        while !self.is_at_end() && self.peek() != b'"' {
             if self.peek() == b'\n' {
                 self.line += 1
             }
