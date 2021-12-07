@@ -389,7 +389,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
                 precedence: Precedence::None,
             },
             TokenType::False => ParseRule {
-                prefix: Some(ParseFn::Normal(Parser::number)),
+                prefix: Some(ParseFn::Normal(Parser::literal)),
                 infix: None,
                 precedence: Precedence::None,
             },
