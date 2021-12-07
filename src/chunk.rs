@@ -10,11 +10,7 @@ pub(crate) enum Value {
 
 impl Value {
     pub(crate) fn is_falsey(&self) -> bool {
-        match self {
-            Value::Bool(value) => !value,
-            Value::Nil => true,
-            _ => false,
-        }
+        matches!(self, Value::Bool(false) | Value::Nil)
     }
 }
 
