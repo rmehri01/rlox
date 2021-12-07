@@ -62,6 +62,7 @@ pub(crate) struct Parser<'intern, 'code> {
     chunk: Chunk,
     scanner: Scanner<'code>,
     interner: &'code mut Interner<'intern>,
+    compiler: Compiler<'code>,
     current: Token<'code>,
     previous: Token<'code>,
     had_error: bool,
@@ -74,6 +75,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             chunk: Chunk::new(),
             scanner: Scanner::new(code),
             interner,
+            compiler: Compiler::new(),
             current: Token::new(TokenType::Error, "", 0),
             previous: Token::new(TokenType::Error, "", 0),
             had_error: false,
@@ -110,7 +112,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
         loop {
             self.current = self.scanner.scan_token();
-            if self.current.kind != TokenType::Error {
+            if !self.check(TokenType::Error) {
                 break;
             }
 
@@ -145,7 +147,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn consume(&mut self, kind: TokenType, message: &str) {
-        if self.current.kind == kind {
+        if self.check(kind) {
             self.advance();
         } else {
             self.error_at_current(message);
@@ -484,6 +486,10 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else if self.matches(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
@@ -496,7 +502,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn matches(&mut self, kind: TokenType) -> bool {
-        if self.current.kind == kind {
+        if self.check(kind) {
             self.advance();
             true
         } else {
@@ -552,6 +558,12 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
     fn parse_variable(&mut self, error_message: &str) -> u8 {
         self.consume(TokenType::Identifier, error_message);
+
+        self.declare_variable();
+        if self.compiler.scope_depth > 0 {
+            return 0;
+        }
+
         self.identifier_constant(self.previous)
     }
 
@@ -561,16 +573,136 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn define_variable(&mut self, index: u8) {
+        if self.compiler.scope_depth > 0 {
+            self.compiler.mark_initialized();
+            return;
+        }
+
         self.emit_op(Op::DefineGlobal(index))
     }
 
-    fn named_variable(&mut self, token: Token, can_assign: bool) {
-        let index = self.identifier_constant(token);
+    fn named_variable(&mut self, name: Token, can_assign: bool) {
+        let get_op;
+        let set_op;
+
+        if let Some((arg, local)) = self.compiler.resolve_local(name) {
+            if local.depth == -1 {
+                self.error("Can't read local variable in its own initializer.");
+            }
+
+            get_op = Op::GetLocal(arg);
+            set_op = Op::SetLocal(arg);
+        } else {
+            let index = self.identifier_constant(name);
+            get_op = Op::GetGlobal(index);
+            set_op = Op::SetGlobal(index);
+        }
+
         if can_assign && self.matches(TokenType::Equal) {
             self.expression();
-            self.emit_op(Op::SetGlobal(index));
+            self.emit_op(set_op);
         } else {
-            self.emit_op(Op::GetGlobal(index));
+            self.emit_op(get_op);
         }
+    }
+
+    fn block(&mut self) {
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.declaration();
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    fn check(&self, kind: TokenType) -> bool {
+        self.current.kind == kind
+    }
+
+    fn begin_scope(&mut self) {
+        self.compiler.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.compiler.scope_depth -= 1;
+
+        while !self.compiler.locals.is_empty()
+            && self.compiler.locals.last().unwrap().depth > self.compiler.scope_depth
+        {
+            self.emit_op(Op::Pop);
+            self.compiler.locals.pop();
+        }
+    }
+
+    fn declare_variable(&mut self) {
+        if self.compiler.scope_depth == 0 {
+            return;
+        }
+
+        let prev = self.previous;
+
+        if self.compiler.is_local_declared(prev) {
+            self.error("Already a variable with this name in this scope.")
+        }
+
+        self.add_local(prev);
+    }
+
+    fn add_local(&mut self, token: Token<'code>) {
+        if self.compiler.locals.len() == Compiler::MAX_LOCALS {
+            self.error("Too many local variables in function.");
+            return;
+        }
+
+        let local = Local::new(token, -1);
+        self.compiler.locals.push(local);
+    }
+}
+
+struct Compiler<'code> {
+    locals: Vec<Local<'code>>,
+    scope_depth: i32,
+}
+
+impl<'code> Compiler<'code> {
+    const MAX_LOCALS: usize = u8::MAX as usize + 1;
+
+    fn new() -> Self {
+        Self {
+            locals: Vec::with_capacity(Compiler::MAX_LOCALS),
+            scope_depth: 0,
+        }
+    }
+
+    fn is_local_declared(&self, name: Token) -> bool {
+        self.locals
+            .iter()
+            .rev()
+            .take_while(|local| local.depth == -1 || local.depth >= self.scope_depth)
+            .any(|local| local.name.lexeme == name.lexeme)
+    }
+
+    fn resolve_local(&self, name: Token) -> Option<(u8, &Local)> {
+        self.locals
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, local)| local.name.lexeme == name.lexeme)
+            .map(|(i, local)| (i as u8, local))
+    }
+
+    fn mark_initialized(&mut self) {
+        let last = self.locals.last_mut().unwrap();
+        last.depth = self.scope_depth;
+    }
+}
+
+struct Local<'code> {
+    name: Token<'code>,
+    depth: i32,
+}
+
+impl<'code> Local<'code> {
+    fn new(name: Token<'code>, depth: i32) -> Self {
+        Self { name, depth }
     }
 }

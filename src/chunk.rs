@@ -25,6 +25,8 @@ pub(crate) enum Op {
     True,
     False,
     Pop,
+    GetLocal(u8),
+    SetLocal(u8),
     GetGlobal(u8),
     DefineGlobal(u8),
     SetGlobal(u8),

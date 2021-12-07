@@ -67,6 +67,13 @@ impl<'intern, 'code> Vm<'intern> {
                 Op::Pop => {
                     self.pop();
                 }
+                Op::GetLocal(index) => {
+                    let value = self.stack[index as usize];
+                    self.push(value);
+                }
+                Op::SetLocal(index) => {
+                    self.stack[index as usize] = self.peek(0);
+                }
                 Op::GetGlobal(index) => {
                     let str_id = self.chunk.read_string(index);
                     match self.globals.get(&str_id) {
