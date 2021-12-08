@@ -139,6 +139,9 @@ impl<'intern, 'code> Vm<'intern> {
                         self.ip += offset as usize;
                     }
                 }
+                Op::Loop(offset) => {
+                    self.ip -= offset as usize;
+                }
                 Op::Return => {
                     return Ok(());
                 }

@@ -38,6 +38,7 @@ pub(crate) enum Op {
     Print,
     Jump(u16),
     JumpIfFalse(u16),
+    Loop(u16),
     Return,
 }
 
