@@ -506,6 +506,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else if self.matches(TokenType::For) {
+            self.for_statement();
         } else if self.matches(TokenType::If) {
             self.if_statement();
         } else if self.matches(TokenType::While) {
@@ -715,8 +717,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         }
     }
 
-    fn emit_jump(&mut self, make_op: fn(u16) -> Op) -> usize {
-        self.emit_op(make_op(0xffff));
+    fn emit_jump(&mut self, make_jump: fn(u16) -> Op) -> usize {
+        self.emit_op(make_jump(0xffff));
         self.chunk.last_index()
     }
 
@@ -736,11 +738,58 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
-        let offset = self.chunk.code.len() - loop_start;
+        let offset = self.chunk.code.len() - loop_start + 1;
         match u16::try_from(offset) {
             Ok(offset) => self.emit_op(Op::Loop(offset)),
             Err(_) => self.error("Loop body too large."),
         }
+    }
+
+    fn for_statement(&mut self) {
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        if self.matches(TokenType::Semicolon) {
+            // No initializer.
+        } else if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.chunk.code.len();
+
+        let mut exit_jump = None;
+        if !self.matches(TokenType::Semicolon) {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.");
+
+            exit_jump = Some(self.emit_jump(Op::JumpIfFalse));
+            self.emit_op(Op::Pop);
+        }
+
+        if !self.matches(TokenType::RightParen) {
+            let body_jump = self.emit_jump(Op::Jump);
+            let increment_start = self.chunk.code.len();
+
+            self.expression();
+            self.emit_op(Op::Pop);
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+            self.emit_op(Op::Pop);
+        }
+
+        self.end_scope();
     }
 }
 
