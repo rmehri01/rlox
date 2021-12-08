@@ -486,6 +486,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn statement(&mut self) {
         if self.matches(TokenType::Print) {
             self.print_statement();
+        } else if self.matches(TokenType::If) {
+            self.if_statement();
         } else if self.matches(TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
@@ -655,6 +657,43 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
         let local = Local::new(token, -1);
         self.compiler.locals.push(local);
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        self.emit_op(Op::JumpIfFalse(0xffff));
+        let then_jump = self.chunk.last_index();
+        self.emit_op(Op::Pop);
+        self.statement();
+
+        self.emit_op(Op::Jump(0xffff));
+        let else_jump = self.chunk.last_index();
+
+        self.patch_jump(then_jump);
+        self.emit_op(Op::Pop);
+
+        if self.matches(TokenType::Else) {
+            self.statement();
+        }
+
+        self.patch_jump(else_jump);
+    }
+
+    fn patch_jump(&mut self, offset: usize) {
+        let jump = self.chunk.last_index() - offset;
+        let jump = u16::try_from(jump).unwrap_or_else(|_| {
+            self.error("Too much code to jump over.");
+            0xffff
+        });
+
+        match self.chunk.code[offset] {
+            Op::JumpIfFalse(ref mut o) => *o = jump,
+            Op::Jump(ref mut o) => *o = jump,
+            _ => panic!("Attempting to patch non-jump op"),
+        }
     }
 }
 

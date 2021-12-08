@@ -131,6 +131,14 @@ impl<'intern, 'code> Vm<'intern> {
                         Value::String(str_id) => println!("{}", self.interner.lookup(str_id)),
                     };
                 }
+                Op::Jump(offset) => {
+                    self.ip += offset as usize;
+                }
+                Op::JumpIfFalse(offset) => {
+                    if self.peek(0).is_falsey() {
+                        self.ip += offset as usize;
+                    }
+                }
                 Op::Return => {
                     return Ok(());
                 }

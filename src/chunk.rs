@@ -36,12 +36,14 @@ pub(crate) enum Op {
     Not,
     Negate,
     Print,
+    Jump(u16),
+    JumpIfFalse(u16),
     Return,
 }
 
 #[derive(Debug)]
 pub(crate) struct Chunk {
-    code: Vec<Op>,
+    pub(crate) code: Vec<Op>,
     constants: Vec<Value>,
     pub(crate) lines: Vec<usize>,
 }
@@ -79,5 +81,9 @@ impl Chunk {
         } else {
             panic!("Constant is not string.")
         }
+    }
+
+    pub fn last_index(&self) -> usize {
+        self.code.len() - 1
     }
 }
