@@ -187,6 +187,26 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         self.named_variable(self.previous, can_assign);
     }
 
+    fn and(&mut self) {
+        let end_jump = self.emit_jump(Op::JumpIfFalse);
+
+        self.emit_op(Op::Pop);
+        self.parse_precedence(Precedence::And);
+
+        self.patch_jump(end_jump);
+    }
+
+    fn or(&mut self) {
+        let else_jump = self.emit_jump(Op::JumpIfFalse);
+        let end_jump = self.emit_jump(Op::Jump);
+
+        self.patch_jump(else_jump);
+        self.emit_op(Op::Pop);
+
+        self.parse_precedence(Precedence::Or);
+        self.patch_jump(end_jump);
+    }
+
     fn make_constant(&mut self, value: Value) -> u8 {
         let constant = self.chunk.add_constant(value);
         match u8::try_from(constant) {
@@ -375,8 +395,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             },
             TokenType::And => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(ParseFn::Normal(Parser::and)),
+                precedence: Precedence::And,
             },
             TokenType::Class => ParseRule {
                 prefix: None,
@@ -415,8 +435,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             },
             TokenType::Or => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(ParseFn::Normal(Parser::or)),
+                precedence: Precedence::Or,
             },
             TokenType::Print => ParseRule {
                 prefix: None,
@@ -664,14 +684,11 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
 
-        self.emit_op(Op::JumpIfFalse(0xffff));
-        let then_jump = self.chunk.last_index();
+        let then_jump = self.emit_jump(Op::JumpIfFalse);
         self.emit_op(Op::Pop);
         self.statement();
 
-        self.emit_op(Op::Jump(0xffff));
-        let else_jump = self.chunk.last_index();
-
+        let else_jump = self.emit_jump(Op::Jump);
         self.patch_jump(then_jump);
         self.emit_op(Op::Pop);
 
@@ -694,6 +711,11 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             Op::Jump(ref mut o) => *o = jump,
             _ => panic!("Attempting to patch non-jump op"),
         }
+    }
+
+    fn emit_jump(&mut self, make_op: fn(u16) -> Op) -> usize {
+        self.emit_op(make_op(0xffff));
+        self.chunk.last_index()
     }
 }
 
