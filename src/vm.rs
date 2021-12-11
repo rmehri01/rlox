@@ -1,7 +1,5 @@
-use std::{
-    collections::HashMap,
-    time::{self, SystemTime},
-};
+use rustc_hash::FxHashMap;
+use std::time::{self, SystemTime};
 
 use crate::{
     chunk::{Chunk, Op, Value},
@@ -16,7 +14,7 @@ pub(crate) struct Vm<'intern> {
     stack: Vec<Value>,
     interner: Interner<'intern>,
     functions: Functions,
-    globals: HashMap<StrId, Value>,
+    globals: FxHashMap<StrId, Value>,
 }
 
 impl<'intern, 'code> Vm<'intern> {
@@ -29,7 +27,7 @@ impl<'intern, 'code> Vm<'intern> {
             stack: Vec::with_capacity(Vm::STACK_MAX),
             interner,
             functions: Functions::new(),
-            globals: HashMap::new(),
+            globals: FxHashMap::default(),
         };
 
         vm.define_native("clock", NativeFunction(clock_native));

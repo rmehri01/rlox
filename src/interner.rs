@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use typed_arena::Arena;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct StrId(usize);
 
 pub(crate) struct Interner<'a> {
-    map: HashMap<&'a str, StrId>,
+    map: FxHashMap<&'a str, StrId>,
     vec: Vec<&'a str>,
     arena: &'a Arena<u8>,
 }
@@ -13,7 +13,7 @@ pub(crate) struct Interner<'a> {
 impl Interner<'_> {
     pub(crate) fn new(arena: &Arena<u8>) -> Interner {
         Interner {
-            map: HashMap::new(),
+            map: FxHashMap::default(),
             vec: Vec::new(),
             arena,
         }
