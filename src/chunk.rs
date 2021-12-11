@@ -1,4 +1,4 @@
-use crate::interner::StrId;
+use crate::{interner::StrId, object::FunId};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Value {
@@ -6,6 +6,7 @@ pub(crate) enum Value {
     Nil,
     Number(f64),
     String(StrId),
+    Function(FunId),
 }
 
 impl Value {

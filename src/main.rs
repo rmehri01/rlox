@@ -4,7 +4,6 @@ use std::{
     process,
 };
 
-use chunk::Chunk;
 use error::LoxError;
 use interner::Interner;
 use typed_arena::Arena;
@@ -15,6 +14,7 @@ mod chunk;
 mod compiler;
 mod error;
 mod interner;
+mod object;
 mod scanner;
 mod vm;
 
@@ -22,7 +22,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let arena = Arena::new();
     let interner = Interner::new(&arena);
-    let mut vm = Vm::new(interner, Chunk::new());
+    let mut vm = Vm::new(interner);
 
     match args.len() {
         1 => repl(&mut vm),

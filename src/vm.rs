@@ -5,34 +5,37 @@ use crate::{
     compiler::Parser,
     error::LoxError,
     interner::{Interner, StrId},
+    object::{FunId, Functions},
 };
 
 pub(crate) struct Vm<'intern> {
-    chunk: Chunk,
+    frames: Vec<CallFrame>,
     stack: Vec<Value>,
     interner: Interner<'intern>,
+    functions: Functions,
     globals: HashMap<StrId, Value>,
-    ip: usize,
 }
 
 impl<'intern, 'code> Vm<'intern> {
-    const CAPACITY: usize = 256;
+    const FRAMES_MAX: usize = 64;
+    const STACK_MAX: usize = Vm::FRAMES_MAX * (u8::MAX as usize + 1);
 
-    pub(crate) fn new(interner: Interner<'intern>, chunk: Chunk) -> Self {
+    pub(crate) fn new(interner: Interner<'intern>) -> Self {
         Self {
-            chunk,
-            stack: Vec::with_capacity(Vm::CAPACITY),
-            globals: HashMap::new(),
+            frames: Vec::with_capacity(Vm::FRAMES_MAX),
+            stack: Vec::with_capacity(Vm::STACK_MAX),
             interner,
-            ip: 0,
+            functions: Functions::new(),
+            globals: HashMap::new(),
         }
     }
 
     pub(crate) fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
-        let chunk = Parser::new(&mut self.interner, code).compile()?;
+        let function = Parser::new(&mut self.interner, code).compile()?;
 
-        self.chunk = chunk;
-        self.ip = 0;
+        let fn_id = self.functions.add(function);
+        self.stack.push(Value::Function(fn_id));
+        self.frames.push(CallFrame::new(fn_id, 0));
 
         self.run()
     }
@@ -41,7 +44,7 @@ impl<'intern, 'code> Vm<'intern> {
         loop {
             match self.read_op() {
                 Op::Constant(index) => {
-                    let constant = self.chunk.read_constant(index);
+                    let constant = self.current_chunk().read_constant(index);
                     self.push(constant);
                 }
                 Op::Add => {
@@ -68,14 +71,16 @@ impl<'intern, 'code> Vm<'intern> {
                     self.pop();
                 }
                 Op::GetLocal(index) => {
-                    let value = self.stack[index as usize];
+                    let slot = self.current_frame().slot + index as usize;
+                    let value = self.stack[slot];
                     self.push(value);
                 }
                 Op::SetLocal(index) => {
-                    self.stack[index as usize] = self.peek(0);
+                    let slot = self.current_frame().slot + index as usize;
+                    self.stack[slot] = self.peek(0);
                 }
                 Op::GetGlobal(index) => {
-                    let str_id = self.chunk.read_string(index);
+                    let str_id = self.current_chunk().read_string(index);
                     match self.globals.get(&str_id) {
                         Some(&value) => self.push(value),
                         None => {
@@ -86,12 +91,12 @@ impl<'intern, 'code> Vm<'intern> {
                     }
                 }
                 Op::DefineGlobal(index) => {
-                    let str_id = self.chunk.read_string(index);
+                    let str_id = self.current_chunk().read_string(index);
                     let name = self.pop();
                     self.globals.insert(str_id, name);
                 }
                 Op::SetGlobal(index) => {
-                    let str_id = self.chunk.read_string(index);
+                    let str_id = self.current_chunk().read_string(index);
                     let value = self.peek(0);
                     if self.globals.insert(str_id, value).is_none() {
                         self.globals.remove(&str_id);
@@ -129,18 +134,22 @@ impl<'intern, 'code> Vm<'intern> {
                         Value::Nil => println!("nil"),
                         Value::Number(value) => println!("{}", value),
                         Value::String(str_id) => println!("{}", self.interner.lookup(str_id)),
+                        Value::Function(fn_id) => {
+                            let fn_name = self.functions.lookup(fn_id).name;
+                            println!("<fn {}>", self.interner.lookup(fn_name));
+                        }
                     };
                 }
                 Op::Jump(offset) => {
-                    self.ip += offset as usize;
+                    self.current_frame_mut().ip += offset as usize;
                 }
                 Op::JumpIfFalse(offset) => {
                     if self.peek(0).is_falsey() {
-                        self.ip += offset as usize;
+                        self.current_frame_mut().ip += offset as usize;
                     }
                 }
                 Op::Loop(offset) => {
-                    self.ip -= offset as usize;
+                    self.current_frame_mut().ip -= offset as usize;
                 }
                 Op::Return => {
                     return Ok(());
@@ -174,8 +183,9 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     fn read_op(&mut self) -> Op {
-        let op = self.chunk.read(self.ip);
-        self.ip += 1;
+        let frame = self.current_frame();
+        let op = self.current_chunk().read(frame.ip);
+        self.current_frame_mut().ip += 1;
         op
     }
 
@@ -186,8 +196,34 @@ impl<'intern, 'code> Vm<'intern> {
 
     fn runtime_error(&self, message: &str) -> Result<(), LoxError> {
         eprintln!("{}", message);
-        let line = self.chunk.lines[self.ip - 1];
+        let frame = self.current_frame();
+        let line = self.current_chunk().lines[frame.ip - 1];
         eprintln!("[line {}] in script", line);
         Err(LoxError::RuntimeError)
+    }
+
+    fn current_frame(&self) -> &CallFrame {
+        self.frames.last().unwrap()
+    }
+
+    fn current_frame_mut(&mut self) -> &mut CallFrame {
+        self.frames.last_mut().unwrap()
+    }
+
+    fn current_chunk(&self) -> &Chunk {
+        let fn_id = self.current_frame().fn_id;
+        let function = self.functions.lookup(fn_id);
+        &function.chunk
+    }
+}
+
+struct CallFrame {
+    fn_id: FunId,
+    ip: usize,
+    slot: usize,
+}
+impl CallFrame {
+    fn new(fn_id: FunId, slot: usize) -> Self {
+        Self { fn_id, ip: 0, slot }
     }
 }

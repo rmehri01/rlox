@@ -2,6 +2,7 @@ use crate::{
     chunk::{Chunk, Op, Value},
     error::LoxError,
     interner::Interner,
+    object::Function,
     scanner::{Scanner, Token, TokenType},
 };
 
@@ -59,7 +60,6 @@ impl<'intern, 'code> ParseFn<'intern, 'code> {
 }
 
 pub(crate) struct Parser<'intern, 'code> {
-    chunk: Chunk,
     scanner: Scanner<'code>,
     interner: &'code mut Interner<'intern>,
     compiler: Compiler<'code>,
@@ -72,10 +72,9 @@ pub(crate) struct Parser<'intern, 'code> {
 impl<'intern, 'code> Parser<'intern, 'code> {
     pub(crate) fn new(interner: &'code mut Interner<'intern>, code: &'code str) -> Self {
         Self {
-            chunk: Chunk::new(),
             scanner: Scanner::new(code),
             interner,
-            compiler: Compiler::new(),
+            compiler: Compiler::new(FunctionType::Script),
             current: Token::new(TokenType::Error, "", 0),
             previous: Token::new(TokenType::Error, "", 0),
             had_error: false,
@@ -83,7 +82,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         }
     }
 
-    pub(crate) fn compile(mut self) -> Result<Chunk, LoxError> {
+    pub(crate) fn compile(mut self) -> Result<Function, LoxError> {
         self.advance();
 
         while !self.matches(TokenType::Eof) {
@@ -94,17 +93,21 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         if self.had_error {
             Err(LoxError::CompileError)
         } else {
-            Ok(self.chunk)
+            Ok(self.compiler.function)
         }
     }
 
     fn emit_ops(&mut self, op1: Op, op2: Op) {
-        self.chunk.write(op1, self.previous.line);
-        self.chunk.write(op2, self.previous.line);
+        let line1 = self.previous.line;
+        self.current_chunk_mut().write(op1, line1);
+
+        let line2 = self.previous.line;
+        self.current_chunk_mut().write(op2, line2);
     }
 
     fn emit_op(&mut self, op: Op) {
-        self.chunk.write(op, self.previous.line);
+        let line = self.previous.line;
+        self.current_chunk_mut().write(op, line);
     }
 
     fn advance(&mut self) {
@@ -208,7 +211,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
-        let constant = self.chunk.add_constant(value);
+        let constant = self.current_chunk_mut().add_constant(value);
         match u8::try_from(constant) {
             Ok(index) => index,
             Err(_) => {
@@ -704,13 +707,13 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn patch_jump(&mut self, offset: usize) {
-        let jump = self.chunk.last_index() - offset;
+        let jump = self.current_chunk().last_index() - offset;
         let jump = u16::try_from(jump).unwrap_or_else(|_| {
             self.error("Too much code to jump over.");
             0xffff
         });
 
-        match self.chunk.code[offset] {
+        match self.current_chunk_mut().code[offset] {
             Op::JumpIfFalse(ref mut o) => *o = jump,
             Op::Jump(ref mut o) => *o = jump,
             _ => panic!("Attempting to patch non-jump op"),
@@ -719,11 +722,11 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
     fn emit_jump(&mut self, make_jump: fn(u16) -> Op) -> usize {
         self.emit_op(make_jump(0xffff));
-        self.chunk.last_index()
+        self.current_chunk().last_index()
     }
 
     fn while_statement(&mut self) {
-        let loop_start = self.chunk.code.len();
+        let loop_start = self.current_chunk().code.len();
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
         self.expression();
         self.consume(TokenType::RightParen, "Expect ')' after condition.");
@@ -738,7 +741,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
-        let offset = self.chunk.code.len() - loop_start + 1;
+        let offset = self.current_chunk().code.len() - loop_start + 1;
         match u16::try_from(offset) {
             Ok(offset) => self.emit_op(Op::Loop(offset)),
             Err(_) => self.error("Loop body too large."),
@@ -757,7 +760,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             self.expression_statement();
         }
 
-        let mut loop_start = self.chunk.code.len();
+        let mut loop_start = self.current_chunk().code.len();
 
         let mut exit_jump = None;
         if !self.matches(TokenType::Semicolon) {
@@ -770,7 +773,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
         if !self.matches(TokenType::RightParen) {
             let body_jump = self.emit_jump(Op::Jump);
-            let increment_start = self.chunk.code.len();
+            let increment_start = self.current_chunk().code.len();
 
             self.expression();
             self.emit_op(Op::Pop);
@@ -791,9 +794,24 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
         self.end_scope();
     }
+
+    fn current_chunk(&self) -> &Chunk {
+        &self.compiler.function.chunk
+    }
+
+    fn current_chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.compiler.function.chunk
+    }
+}
+
+enum FunctionType {
+    Function,
+    Script,
 }
 
 struct Compiler<'code> {
+    function: Function,
+    function_type: FunctionType,
     locals: Vec<Local<'code>>,
     scope_depth: i32,
 }
@@ -801,9 +819,14 @@ struct Compiler<'code> {
 impl<'code> Compiler<'code> {
     const MAX_LOCALS: usize = u8::MAX as usize + 1;
 
-    fn new() -> Self {
+    fn new(kind: FunctionType) -> Self {
+        let mut locals = Vec::with_capacity(Compiler::MAX_LOCALS);
+        locals.push(Local::new(Token::new(TokenType::Error, "", 0), 0)); // TODO: initializer
+
         Self {
-            locals: Vec::with_capacity(Compiler::MAX_LOCALS),
+            function: Function::new(),
+            function_type: kind,
+            locals,
             scope_depth: 0,
         }
     }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use typed_arena::Arena;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct StrId(usize);
+pub(crate) struct StrId(pub(crate) usize);
 
 pub(crate) struct Interner<'a> {
     map: HashMap<&'a str, StrId>,
