@@ -1,4 +1,10 @@
-use crate::{chunk::Chunk, interner::StrId};
+use core::fmt;
+use std::ptr;
+
+use crate::{
+    chunk::{Chunk, Value},
+    interner::StrId,
+};
 
 #[derive(Debug)]
 pub(crate) struct Function {
@@ -14,6 +20,21 @@ impl Function {
             chunk: Chunk::new(),
             name,
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct NativeFunction(pub(crate) fn(&[Value]) -> Value);
+
+impl fmt::Debug for NativeFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<native fn>")
+    }
+}
+
+impl PartialEq for NativeFunction {
+    fn eq(&self, other: &Self) -> bool {
+        ptr::eq(self, other)
     }
 }
 

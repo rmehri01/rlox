@@ -1,11 +1,14 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{self, SystemTime},
+};
 
 use crate::{
     chunk::{Chunk, Op, Value},
     compiler::Parser,
     error::LoxError,
     interner::{Interner, StrId},
-    object::{FunId, Functions},
+    object::{FunId, Functions, NativeFunction},
 };
 
 pub(crate) struct Vm<'intern> {
@@ -21,13 +24,16 @@ impl<'intern, 'code> Vm<'intern> {
     const STACK_MAX: usize = Vm::FRAMES_MAX * (u8::MAX as usize + 1);
 
     pub(crate) fn new(interner: Interner<'intern>) -> Self {
-        Self {
+        let mut vm = Self {
             frames: Vec::with_capacity(Vm::FRAMES_MAX),
             stack: Vec::with_capacity(Vm::STACK_MAX),
             interner,
             functions: Functions::new(),
             globals: HashMap::new(),
-        }
+        };
+
+        vm.define_native("clock", NativeFunction(clock_native));
+        vm
     }
 
     pub(crate) fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
@@ -143,6 +149,7 @@ impl<'intern, 'code> Vm<'intern> {
                                 None => panic!("Expected function name"),
                             }
                         }
+                        Value::NativeFunction(_) => println!("<native fn>"),
                     };
                 }
                 Op::Jump(offset) => {
@@ -249,6 +256,12 @@ impl<'intern, 'code> Vm<'intern> {
     fn call_value(&mut self, arg_count: usize) -> Result<(), LoxError> {
         match self.peek(arg_count) {
             Value::Function(fun_id) => self.call(fun_id, arg_count),
+            Value::NativeFunction(native) => {
+                let left = self.stack.len() - arg_count;
+                let result = native.0(&self.stack[left..]);
+                self.push(result);
+                Ok(())
+            }
             _ => self.runtime_error("Can only call functions and classes."),
         }
     }
@@ -272,6 +285,11 @@ impl<'intern, 'code> Vm<'intern> {
             Ok(())
         }
     }
+
+    fn define_native(&mut self, name: &str, native: NativeFunction) {
+        let name = self.interner.intern(name);
+        self.globals.insert(name, Value::NativeFunction(native));
+    }
 }
 
 #[derive(Debug)]
@@ -289,4 +307,12 @@ impl CallFrame {
             slot,
         }
     }
+}
+
+fn clock_native(_args: &[Value]) -> Value {
+    let start = SystemTime::now();
+    let time = start
+        .duration_since(time::UNIX_EPOCH)
+        .expect("Time went backwards");
+    Value::Number(time.as_secs_f64())
 }
