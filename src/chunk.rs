@@ -40,6 +40,7 @@ pub(crate) enum Op {
     Jump(u16),
     JumpIfFalse(u16),
     Loop(u16),
+    Call(u8),
     Return,
 }
 

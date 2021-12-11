@@ -4,11 +4,11 @@ use crate::{chunk::Chunk, interner::StrId};
 pub(crate) struct Function {
     pub(crate) arity: usize,
     pub(crate) chunk: Chunk,
-    pub(crate) name: StrId,
+    pub(crate) name: Option<StrId>,
 }
 
 impl Function {
-    pub(crate) fn new(name: StrId) -> Self {
+    pub(crate) fn new(name: Option<StrId>) -> Self {
         Self {
             arity: 0,
             chunk: Chunk::new(),
@@ -20,6 +20,7 @@ impl Function {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct FunId(usize);
 
+#[derive(Debug)]
 pub(crate) struct Functions {
     functions: Vec<Function>,
 }

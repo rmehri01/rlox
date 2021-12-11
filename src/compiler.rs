@@ -78,12 +78,10 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         functions: &'code mut Functions,
         code: &'code str,
     ) -> Self {
-        let function_name = interner.intern("script");
-
         Self {
             scanner: Scanner::new(code),
             interner,
-            compiler: Compiler::new(function_name, FunctionType::Script),
+            compiler: Compiler::new(None, FunctionType::Script),
             functions,
             current: Token::new(TokenType::Error, "", 0),
             previous: Token::new(TokenType::Error, "", 0),
@@ -99,7 +97,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             self.declaration();
         }
 
-        self.emit_op(Op::Return);
+        self.emit_return();
+
         if self.had_error {
             Err(LoxError::CompileError)
         } else {
@@ -298,8 +297,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         match kind {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(ParseFn::Normal(Parser::grouping)),
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(ParseFn::Normal(Parser::call)),
+                precedence: Precedence::Call,
             },
             TokenType::RightParen => ParseRule {
                 prefix: None,
@@ -525,6 +524,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             self.for_statement();
         } else if self.matches(TokenType::If) {
             self.if_statement();
+        } else if self.matches(TokenType::Return) {
+            self.return_statement();
         } else if self.matches(TokenType::While) {
             self.while_statement();
         } else if self.matches(TokenType::LeftBrace) {
@@ -856,18 +857,67 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
     fn push_compiler(&mut self, kind: FunctionType) {
         let function_name = self.interner.intern(self.previous.lexeme);
-        let inner = Compiler::new(function_name, kind);
+        let inner = Compiler::new(Some(function_name), kind);
         let enclosing = mem::replace(&mut self.compiler, inner);
         self.compiler.enclosing = Some(Box::new(enclosing));
     }
 
     fn pop_compiler(&mut self) -> Function {
+        self.emit_return();
+
         let enclosing = self.compiler.enclosing.take();
         let inner = mem::replace(&mut self.compiler, *enclosing.expect("enclosing compiler"));
         inner.function
     }
+
+    fn call(&mut self) {
+        let arg_count = self.argument_list();
+        self.emit_op(Op::Call(arg_count));
+    }
+
+    fn argument_list(&mut self) -> u8 {
+        let mut arg_count = 0;
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.expression();
+                arg_count += 1;
+
+                if arg_count == 255 {
+                    self.error("Can't have more than 255 arguments.");
+                }
+
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
+    }
+
+    fn emit_return(&mut self) {
+        self.emit_op(Op::Nil);
+        self.emit_op(Op::Return);
+    }
+
+    fn return_statement(&mut self) {
+        if self.compiler.function_type == FunctionType::Script {
+            self.error("Can't return from top-level code.");
+        }
+
+        if self.matches(TokenType::Semicolon) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit_op(Op::Return);
+        }
+    }
 }
 
+#[derive(PartialEq)]
 enum FunctionType {
     Function,
     Script,
@@ -884,7 +934,7 @@ struct Compiler<'code> {
 impl<'code> Compiler<'code> {
     const MAX_LOCALS: usize = u8::MAX as usize + 1;
 
-    fn new(function_name: StrId, kind: FunctionType) -> Self {
+    fn new(function_name: Option<StrId>, kind: FunctionType) -> Self {
         let mut locals = Vec::with_capacity(Compiler::MAX_LOCALS);
         locals.push(Local::new(Token::new(TokenType::Error, "", 0), 0)); // TODO: initializer
 

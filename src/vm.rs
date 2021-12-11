@@ -35,7 +35,7 @@ impl<'intern, 'code> Vm<'intern> {
 
         let fun_id = self.functions.add(function);
         self.stack.push(Value::Function(fun_id));
-        self.frames.push(CallFrame::new(fun_id, 0));
+        self.call(fun_id, 0)?;
 
         self.run()
     }
@@ -136,7 +136,12 @@ impl<'intern, 'code> Vm<'intern> {
                         Value::String(str_id) => println!("{}", self.interner.lookup(str_id)),
                         Value::Function(fun_id) => {
                             let fn_name = self.functions.lookup(fun_id).name;
-                            println!("<fn {}>", self.interner.lookup(fn_name));
+                            match fn_name {
+                                Some(str_id) => {
+                                    println!("<fn {}>", self.interner.lookup(str_id));
+                                }
+                                None => panic!("Expected function name"),
+                            }
                         }
                     };
                 }
@@ -151,8 +156,19 @@ impl<'intern, 'code> Vm<'intern> {
                 Op::Loop(offset) => {
                     self.current_frame_mut().ip -= offset as usize;
                 }
+                Op::Call(arg_count) => {
+                    self.call_value(arg_count as usize)?;
+                }
                 Op::Return => {
-                    return Ok(());
+                    let frame = self.frames.pop().unwrap();
+                    let result = self.pop();
+
+                    if self.frames.is_empty() {
+                        return Ok(());
+                    } else {
+                        self.stack.truncate(frame.slot);
+                        self.push(result);
+                    }
                 }
             }
         }
@@ -196,9 +212,23 @@ impl<'intern, 'code> Vm<'intern> {
 
     fn runtime_error(&self, message: &str) -> Result<(), LoxError> {
         eprintln!("{}", message);
-        let frame = self.current_frame();
-        let line = self.current_chunk().lines[frame.ip - 1];
-        eprintln!("[line {}] in script", line);
+
+        self.frames.iter().rev().for_each(|frame| {
+            let function = self.functions.lookup(frame.fun_id);
+            let line = frame.ip - 1;
+
+            match function.name {
+                Some(str_id) => {
+                    let function_name = self.interner.lookup(str_id);
+                    eprintln!(
+                        "[line {}] in {}()",
+                        function.chunk.lines[line], function_name
+                    );
+                }
+                None => eprintln!("[line {}] in script", function.chunk.lines[line]),
+            };
+        });
+
         Err(LoxError::RuntimeError)
     }
 
@@ -215,13 +245,42 @@ impl<'intern, 'code> Vm<'intern> {
         let function = self.functions.lookup(fun_id);
         &function.chunk
     }
+
+    fn call_value(&mut self, arg_count: usize) -> Result<(), LoxError> {
+        match self.peek(arg_count) {
+            Value::Function(fun_id) => self.call(fun_id, arg_count),
+            _ => self.runtime_error("Can only call functions and classes."),
+        }
+    }
+
+    fn call(&mut self, fun_id: FunId, arg_count: usize) -> Result<(), LoxError> {
+        let function = self.functions.lookup(fun_id);
+
+        if arg_count != function.arity {
+            let message = format!(
+                "Expected {} arguments but got {}.",
+                function.arity, arg_count
+            );
+
+            self.runtime_error(&message)
+        } else if self.frames.len() == Vm::FRAMES_MAX {
+            self.runtime_error("Stack overflow.")
+        } else {
+            let frame = CallFrame::new(fun_id, self.stack.len() - arg_count - 1);
+            self.frames.push(frame);
+
+            Ok(())
+        }
+    }
 }
 
+#[derive(Debug)]
 struct CallFrame {
     fun_id: FunId,
     ip: usize,
     slot: usize,
 }
+
 impl CallFrame {
     fn new(fun_id: FunId, slot: usize) -> Self {
         Self {
