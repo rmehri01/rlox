@@ -1,8 +1,10 @@
+use std::mem;
+
 use crate::{
     chunk::{Chunk, Op, Value},
     error::LoxError,
-    interner::Interner,
-    object::Function,
+    interner::{Interner, StrId},
+    object::{Function, Functions},
     scanner::{Scanner, Token, TokenType},
 };
 
@@ -63,6 +65,7 @@ pub(crate) struct Parser<'intern, 'code> {
     scanner: Scanner<'code>,
     interner: &'code mut Interner<'intern>,
     compiler: Compiler<'code>,
+    functions: &'code mut Functions,
     current: Token<'code>,
     previous: Token<'code>,
     had_error: bool,
@@ -70,11 +73,18 @@ pub(crate) struct Parser<'intern, 'code> {
 }
 
 impl<'intern, 'code> Parser<'intern, 'code> {
-    pub(crate) fn new(interner: &'code mut Interner<'intern>, code: &'code str) -> Self {
+    pub(crate) fn new(
+        interner: &'code mut Interner<'intern>,
+        functions: &'code mut Functions,
+        code: &'code str,
+    ) -> Self {
+        let function_name = interner.intern("script");
+
         Self {
             scanner: Scanner::new(code),
             interner,
-            compiler: Compiler::new(FunctionType::Script),
+            compiler: Compiler::new(function_name, FunctionType::Script),
+            functions,
             current: Token::new(TokenType::Error, "", 0),
             previous: Token::new(TokenType::Error, "", 0),
             had_error: false,
@@ -495,7 +505,9 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn declaration(&mut self) {
-        if self.matches(TokenType::Var) {
+        if self.matches(TokenType::Fun) {
+            self.fun_declaration();
+        } else if self.matches(TokenType::Var) {
             self.var_declaration();
         } else {
             self.statement();
@@ -802,6 +814,58 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn current_chunk_mut(&mut self) -> &mut Chunk {
         &mut self.compiler.function.chunk
     }
+
+    fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name.");
+        self.compiler.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
+    }
+
+    fn function(&mut self, kind: FunctionType) {
+        self.push_compiler(kind);
+
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after function name.");
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.compiler.function.arity += 1;
+                if self.compiler.function.arity > 255 {
+                    self.error_at_current("Can't have more than 255 parameters.")
+                }
+
+                let index = self.parse_variable("Expect parameter name.");
+                self.define_variable(index);
+
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.");
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body.");
+
+        self.block();
+
+        let function = self.pop_compiler();
+        let fun_id = self.functions.add(function);
+        let index = self.make_constant(Value::Function(fun_id));
+        self.emit_op(Op::Constant(index));
+    }
+
+    fn push_compiler(&mut self, kind: FunctionType) {
+        let function_name = self.interner.intern(self.previous.lexeme);
+        let inner = Compiler::new(function_name, kind);
+        let enclosing = mem::replace(&mut self.compiler, inner);
+        self.compiler.enclosing = Some(Box::new(enclosing));
+    }
+
+    fn pop_compiler(&mut self) -> Function {
+        let enclosing = self.compiler.enclosing.take();
+        let inner = mem::replace(&mut self.compiler, *enclosing.expect("enclosing compiler"));
+        inner.function
+    }
 }
 
 enum FunctionType {
@@ -810,6 +874,7 @@ enum FunctionType {
 }
 
 struct Compiler<'code> {
+    enclosing: Option<Box<Compiler<'code>>>,
     function: Function,
     function_type: FunctionType,
     locals: Vec<Local<'code>>,
@@ -819,12 +884,13 @@ struct Compiler<'code> {
 impl<'code> Compiler<'code> {
     const MAX_LOCALS: usize = u8::MAX as usize + 1;
 
-    fn new(kind: FunctionType) -> Self {
+    fn new(function_name: StrId, kind: FunctionType) -> Self {
         let mut locals = Vec::with_capacity(Compiler::MAX_LOCALS);
         locals.push(Local::new(Token::new(TokenType::Error, "", 0), 0)); // TODO: initializer
 
         Self {
-            function: Function::new(),
+            enclosing: None,
+            function: Function::new(function_name),
             function_type: kind,
             locals,
             scope_depth: 0,
@@ -849,6 +915,9 @@ impl<'code> Compiler<'code> {
     }
 
     fn mark_initialized(&mut self) {
+        if self.scope_depth == 0 {
+            return;
+        }
         let last = self.locals.last_mut().unwrap();
         last.depth = self.scope_depth;
     }

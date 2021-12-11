@@ -31,11 +31,11 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     pub(crate) fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
-        let function = Parser::new(&mut self.interner, code).compile()?;
+        let function = Parser::new(&mut self.interner, &mut self.functions, code).compile()?;
 
-        let fn_id = self.functions.add(function);
-        self.stack.push(Value::Function(fn_id));
-        self.frames.push(CallFrame::new(fn_id, 0));
+        let fun_id = self.functions.add(function);
+        self.stack.push(Value::Function(fun_id));
+        self.frames.push(CallFrame::new(fun_id, 0));
 
         self.run()
     }
@@ -134,8 +134,8 @@ impl<'intern, 'code> Vm<'intern> {
                         Value::Nil => println!("nil"),
                         Value::Number(value) => println!("{}", value),
                         Value::String(str_id) => println!("{}", self.interner.lookup(str_id)),
-                        Value::Function(fn_id) => {
-                            let fn_name = self.functions.lookup(fn_id).name;
+                        Value::Function(fun_id) => {
+                            let fn_name = self.functions.lookup(fun_id).name;
                             println!("<fn {}>", self.interner.lookup(fn_name));
                         }
                     };
@@ -211,19 +211,23 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     fn current_chunk(&self) -> &Chunk {
-        let fn_id = self.current_frame().fn_id;
-        let function = self.functions.lookup(fn_id);
+        let fun_id = self.current_frame().fun_id;
+        let function = self.functions.lookup(fun_id);
         &function.chunk
     }
 }
 
 struct CallFrame {
-    fn_id: FunId,
+    fun_id: FunId,
     ip: usize,
     slot: usize,
 }
 impl CallFrame {
-    fn new(fn_id: FunId, slot: usize) -> Self {
-        Self { fn_id, ip: 0, slot }
+    fn new(fun_id: FunId, slot: usize) -> Self {
+        Self {
+            fun_id,
+            ip: 0,
+            slot,
+        }
     }
 }

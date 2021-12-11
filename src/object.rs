@@ -2,17 +2,17 @@ use crate::{chunk::Chunk, interner::StrId};
 
 #[derive(Debug)]
 pub(crate) struct Function {
-    arity: usize,
+    pub(crate) arity: usize,
     pub(crate) chunk: Chunk,
     pub(crate) name: StrId,
 }
 
 impl Function {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(name: StrId) -> Self {
         Self {
             arity: 0,
             chunk: Chunk::new(),
-            name: StrId(0), // TODO: not null?
+            name,
         }
     }
 }
@@ -31,8 +31,8 @@ impl Functions {
         }
     }
 
-    pub(crate) fn lookup(&self, fn_id: FunId) -> &Function {
-        &self.functions[fn_id.0]
+    pub(crate) fn lookup(&self, fun_id: FunId) -> &Function {
+        &self.functions[fun_id.0]
     }
 
     pub(crate) fn add(&mut self, function: Function) -> FunId {
