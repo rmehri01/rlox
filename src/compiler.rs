@@ -1,5 +1,7 @@
 use std::mem;
 
+use arrayvec::ArrayVec;
+
 use crate::{
     chunk::{Chunk, Op, Value},
     error::LoxError,
@@ -927,7 +929,7 @@ struct Compiler<'code> {
     enclosing: Option<Box<Compiler<'code>>>,
     function: Function,
     function_type: FunctionType,
-    locals: Vec<Local<'code>>,
+    locals: ArrayVec<Local<'code>, { Compiler::MAX_LOCALS }>,
     scope_depth: i32,
 }
 
@@ -935,7 +937,7 @@ impl<'code> Compiler<'code> {
     const MAX_LOCALS: usize = u8::MAX as usize + 1;
 
     fn new(function_name: Option<StrId>, kind: FunctionType) -> Self {
-        let mut locals = Vec::with_capacity(Compiler::MAX_LOCALS);
+        let mut locals = ArrayVec::new();
         locals.push(Local::new(Token::new(TokenType::Error, "", 0), 0)); // TODO: initializer
 
         Self {

@@ -1,3 +1,4 @@
+use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
 use std::time::{self, SystemTime};
 
@@ -10,8 +11,8 @@ use crate::{
 };
 
 pub(crate) struct Vm<'intern> {
-    frames: Vec<CallFrame>,
-    stack: Vec<Value>,
+    frames: ArrayVec<CallFrame, { Vm::FRAMES_MAX }>,
+    stack: ArrayVec<Value, { Vm::STACK_MAX }>,
     interner: Interner<'intern>,
     functions: Functions,
     globals: FxHashMap<StrId, Value>,
@@ -23,8 +24,8 @@ impl<'intern, 'code> Vm<'intern> {
 
     pub(crate) fn new(interner: Interner<'intern>) -> Self {
         let mut vm = Self {
-            frames: Vec::with_capacity(Vm::FRAMES_MAX),
-            stack: Vec::with_capacity(Vm::STACK_MAX),
+            frames: ArrayVec::new(),
+            stack: ArrayVec::new(),
             interner,
             functions: Functions::new(),
             globals: FxHashMap::default(),
