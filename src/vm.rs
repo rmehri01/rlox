@@ -5,9 +5,9 @@ use std::time::{self, SystemTime};
 use crate::{
     chunk::{Chunk, Op, Value},
     compiler::Parser,
-    error::LoxError,
+    error::{LoxError, RuntimeError, RuntimeResult},
     interner::{Interner, StrId},
-    object::{FunId, Functions, NativeFunction},
+    object::{Closure, Functions, NativeFunction, Upvalue},
 };
 
 pub(crate) struct Vm<'intern> {
@@ -40,12 +40,14 @@ impl<'intern, 'code> Vm<'intern> {
 
         let fun_id = self.functions.add(function);
         self.stack.push(Value::Function(fun_id));
-        self.call(fun_id, 0)?;
 
-        self.run()
+        let closure = Closure::new(fun_id);
+        self.call(closure, 0)
+            .and_then(|_| self.run())
+            .map_err(|_| LoxError::Runtime)
     }
 
-    pub(crate) fn run(&mut self) -> Result<(), LoxError> {
+    pub(crate) fn run(&mut self) -> RuntimeResult {
         loop {
             match self.read_op() {
                 Op::Constant(index) => {
@@ -64,8 +66,9 @@ impl<'intern, 'code> Vm<'intern> {
                         }
                         (Value::Number(a), Value::Number(b)) => self.push(Value::Number(a + b)),
                         _ => {
-                            return self
-                                .runtime_error("Operands must be two numbers or two strings.");
+                            return Err(
+                                self.runtime_error("Operands must be two numbers or two strings.")
+                            );
                         }
                     };
                 }
@@ -77,7 +80,7 @@ impl<'intern, 'code> Vm<'intern> {
                 }
                 Op::GetLocal(index) => {
                     let slot = self.current_frame().slot + index as usize;
-                    let value = self.stack[slot];
+                    let value = self.stack[slot].clone();
                     self.push(value);
                 }
                 Op::SetLocal(index) => {
@@ -87,11 +90,14 @@ impl<'intern, 'code> Vm<'intern> {
                 Op::GetGlobal(index) => {
                     let str_id = self.current_chunk().read_string(index);
                     match self.globals.get(&str_id) {
-                        Some(&value) => self.push(value),
+                        Some(value) => {
+                            let value = value.clone();
+                            self.push(value)
+                        }
                         None => {
                             let name = self.interner.lookup(str_id);
                             let msg = format!("Undefined variable '{}'.", name);
-                            return self.runtime_error(&msg);
+                            return Err(self.runtime_error(&msg));
                         }
                     }
                 }
@@ -107,8 +113,15 @@ impl<'intern, 'code> Vm<'intern> {
                         self.globals.remove(&str_id);
                         let name = self.interner.lookup(str_id);
                         let msg = format!("Undefined variable '{}'.", name);
-                        return self.runtime_error(&msg);
+                        return Err(self.runtime_error(&msg));
                     }
+                }
+                Op::GetUpvalue(slot) => self.push(
+                    self.stack[self.current_closure().upvalues[slot as usize].location].clone(),
+                ),
+                Op::SetUpvalue(slot) => {
+                    let location = self.current_closure().upvalues[slot as usize].location;
+                    self.stack[location] = self.peek(0)
                 }
                 Op::Equal => {
                     let b = self.pop();
@@ -129,7 +142,7 @@ impl<'intern, 'code> Vm<'intern> {
                         self.pop();
                         self.push(Value::Number(-value));
                     } else {
-                        return self.runtime_error("Operand must be a number.");
+                        return Err(self.runtime_error("Operand must be a number."));
                     }
                 }
                 Op::Print => {
@@ -149,6 +162,16 @@ impl<'intern, 'code> Vm<'intern> {
                             }
                         }
                         Value::NativeFunction(_) => println!("<native fn>"),
+                        Value::Closure(Closure { fun_id, .. }) => {
+                            // TODO: duplicated
+                            let fn_name = self.functions.lookup(fun_id).name;
+                            match fn_name {
+                                Some(str_id) => {
+                                    println!("<fn {}>", self.interner.lookup(str_id));
+                                }
+                                None => panic!("Expected function name"),
+                            }
+                        }
                     };
                 }
                 Op::Jump(offset) => {
@@ -164,6 +187,29 @@ impl<'intern, 'code> Vm<'intern> {
                 }
                 Op::Call(arg_count) => {
                     self.call_value(arg_count as usize)?;
+                }
+                Op::Closure(index) => {
+                    let constant = self.current_chunk().read_constant(index);
+
+                    if let Value::Function(fun_id) = constant {
+                        let upvalues = &self.functions.lookup(fun_id).upvalues;
+                        let mut closure = Closure::new(fun_id);
+
+                        upvalues.iter().for_each(|upvalue| {
+                            let obj_upvalue = if upvalue.is_local {
+                                let location = self.current_frame().slot + upvalue.index as usize;
+                                self.capture_upvalue(location)
+                            } else {
+                                self.current_closure().upvalues[upvalue.index as usize].clone()
+                            };
+
+                            closure.upvalues.push(obj_upvalue);
+                        });
+
+                        self.push(Value::Closure(closure));
+                    } else {
+                        panic!("Closure should wrap a function");
+                    }
                 }
                 Op::Return => {
                     let frame = self.frames.pop().unwrap();
@@ -184,7 +230,7 @@ impl<'intern, 'code> Vm<'intern> {
         &mut self,
         op: fn(f64, f64) -> T,
         to_val: fn(T) -> Value,
-    ) -> Result<(), LoxError> {
+    ) -> RuntimeResult {
         let b = self.pop();
         let a = self.pop();
         match (b, a) {
@@ -192,7 +238,7 @@ impl<'intern, 'code> Vm<'intern> {
                 self.push(to_val(op(a_val, b_val)));
                 Ok(())
             }
-            _ => self.runtime_error("Operands must be numbers."),
+            _ => Err(self.runtime_error("Operands must be numbers.")),
         }
     }
 
@@ -213,14 +259,14 @@ impl<'intern, 'code> Vm<'intern> {
 
     fn peek(&self, distance: usize) -> Value {
         let size = self.stack.len();
-        self.stack[size - 1 - distance]
+        self.stack[size - 1 - distance].clone()
     }
 
-    fn runtime_error(&self, message: &str) -> Result<(), LoxError> {
+    fn runtime_error(&self, message: &str) -> RuntimeError {
         eprintln!("{}", message);
 
         self.frames.iter().rev().for_each(|frame| {
-            let function = self.functions.lookup(frame.fun_id);
+            let function = self.functions.lookup(frame.closure.fun_id);
             let line = frame.ip - 1;
 
             match function.name {
@@ -235,7 +281,7 @@ impl<'intern, 'code> Vm<'intern> {
             };
         });
 
-        Err(LoxError::RuntimeError)
+        RuntimeError
     }
 
     fn current_frame(&self) -> &CallFrame {
@@ -246,27 +292,31 @@ impl<'intern, 'code> Vm<'intern> {
         self.frames.last_mut().unwrap()
     }
 
+    fn current_closure(&self) -> &Closure {
+        &self.current_frame().closure
+    }
+
     fn current_chunk(&self) -> &Chunk {
-        let fun_id = self.current_frame().fun_id;
-        let function = self.functions.lookup(fun_id);
+        let closure = self.current_closure();
+        let function = self.functions.lookup(closure.fun_id);
         &function.chunk
     }
 
-    fn call_value(&mut self, arg_count: usize) -> Result<(), LoxError> {
+    fn call_value(&mut self, arg_count: usize) -> RuntimeResult {
         match self.peek(arg_count) {
-            Value::Function(fun_id) => self.call(fun_id, arg_count),
+            Value::Closure(closure) => self.call(closure, arg_count),
             Value::NativeFunction(native) => {
                 let left = self.stack.len() - arg_count;
                 let result = native.0(&self.stack[left..]);
                 self.push(result);
                 Ok(())
             }
-            _ => self.runtime_error("Can only call functions and classes."),
+            _ => Err(self.runtime_error("Can only call functions and classes.")),
         }
     }
 
-    fn call(&mut self, fun_id: FunId, arg_count: usize) -> Result<(), LoxError> {
-        let function = self.functions.lookup(fun_id);
+    fn call(&mut self, closure: Closure, arg_count: usize) -> RuntimeResult {
+        let function = self.functions.lookup(closure.fun_id);
 
         if arg_count != function.arity {
             let message = format!(
@@ -274,11 +324,11 @@ impl<'intern, 'code> Vm<'intern> {
                 function.arity, arg_count
             );
 
-            self.runtime_error(&message)
+            Err(self.runtime_error(&message))
         } else if self.frames.len() == Vm::FRAMES_MAX {
-            self.runtime_error("Stack overflow.")
+            Err(self.runtime_error("Stack overflow."))
         } else {
-            let frame = CallFrame::new(fun_id, self.stack.len() - arg_count - 1);
+            let frame = CallFrame::new(closure, self.stack.len() - arg_count - 1);
             self.frames.push(frame);
 
             Ok(())
@@ -289,19 +339,23 @@ impl<'intern, 'code> Vm<'intern> {
         let name = self.interner.intern(name);
         self.globals.insert(name, Value::NativeFunction(native));
     }
+
+    fn capture_upvalue(&self, location: usize) -> Upvalue {
+        Upvalue::new(location)
+    }
 }
 
 #[derive(Debug)]
 struct CallFrame {
-    fun_id: FunId,
+    closure: Closure,
     ip: usize,
     slot: usize,
 }
 
 impl CallFrame {
-    fn new(fun_id: FunId, slot: usize) -> Self {
+    fn new(closure: Closure, slot: usize) -> Self {
         Self {
-            fun_id,
+            closure,
             ip: 0,
             slot,
         }
