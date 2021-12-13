@@ -1,4 +1,4 @@
-pub(crate) struct Scanner<'code> {
+pub struct Scanner<'code> {
     code: &'code str,
     start: usize,
     current: usize,
@@ -6,7 +6,7 @@ pub(crate) struct Scanner<'code> {
 }
 
 impl<'code> Scanner<'code> {
-    pub(crate) fn new(code: &'code str) -> Self {
+    pub fn new(code: &'code str) -> Self {
         Self {
             code,
             start: 0,
@@ -15,7 +15,7 @@ impl<'code> Scanner<'code> {
         }
     }
 
-    pub(crate) fn scan_token(&mut self) -> Token<'code> {
+    pub fn scan_token(&mut self) -> Token<'code> {
         self.skip_whitespace();
 
         self.start = self.current;
@@ -121,7 +121,7 @@ impl<'code> Scanner<'code> {
     fn string(&mut self) -> Token<'code> {
         while !self.is_at_end() && self.peek() != b'"' {
             if self.peek() == b'\n' {
-                self.line += 1
+                self.line += 1;
             }
             self.advance();
         }
@@ -215,20 +215,20 @@ fn is_alpha(c: u8) -> bool {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Token<'code> {
-    pub(crate) kind: TokenType,
-    pub(crate) lexeme: &'code str,
-    pub(crate) line: usize,
+pub struct Token<'code> {
+    pub kind: TokenType,
+    pub lexeme: &'code str,
+    pub line: usize,
 }
 
 impl<'code> Token<'code> {
-    pub(crate) fn new(kind: TokenType, lexeme: &'code str, line: usize) -> Self {
+    pub fn new(kind: TokenType, lexeme: &'code str, line: usize) -> Self {
         Self { kind, lexeme, line }
     }
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
-pub(crate) enum TokenType {
+pub enum TokenType {
     // Single-character tokens.
     LeftParen,
     RightParen,

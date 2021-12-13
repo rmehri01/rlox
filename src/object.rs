@@ -10,9 +10,9 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct Closure {
-    pub(crate) fun_id: FunId,
-    pub(crate) upvalues: Vec<Upvalue>, // TODO: gc id
+pub struct Closure {
+    pub fun_id: FunId,
+    pub upvalues: Vec<Upvalue>, // TODO: gc id
 }
 
 impl PartialEq for Closure {
@@ -22,7 +22,7 @@ impl PartialEq for Closure {
 }
 
 impl Closure {
-    pub(crate) fn new(fun_id: FunId) -> Self {
+    pub fn new(fun_id: FunId) -> Self {
         Self {
             fun_id,
             upvalues: Vec::new(),
@@ -31,38 +31,38 @@ impl Closure {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Upvalue {
-    pub(crate) location: usize,
+pub struct Upvalue {
+    pub location: usize,
 }
 
 impl Upvalue {
-    pub(crate) fn new(location: usize) -> Self {
+    pub fn new(location: usize) -> Self {
         Self { location }
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct Function {
-    pub(crate) arity: usize,
-    pub(crate) chunk: Chunk,
-    pub(crate) name: Option<StrId>,
-    pub(crate) upvalues: ArrayVec<FnUpvalue, { Compiler::MAX_LOCALS }>,
+pub struct Function {
+    pub arity: usize,
+    pub chunk: Chunk,
+    pub name: Option<StrId>,
+    pub upvalues: ArrayVec<FnUpvalue, { Compiler::MAX_LOCALS }>,
 }
 
 #[derive(Debug)]
-pub(crate) struct FnUpvalue {
-    pub(crate) index: u8,
-    pub(crate) is_local: bool,
+pub struct FnUpvalue {
+    pub index: u8,
+    pub is_local: bool,
 }
 
 impl FnUpvalue {
-    pub(crate) fn new(index: u8, is_local: bool) -> Self {
+    pub fn new(index: u8, is_local: bool) -> Self {
         Self { index, is_local }
     }
 }
 
 impl Function {
-    pub(crate) fn new(name: Option<StrId>) -> Self {
+    pub fn new(name: Option<StrId>) -> Self {
         Self {
             arity: 0,
             chunk: Chunk::new(),
@@ -73,7 +73,7 @@ impl Function {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct NativeFunction(pub(crate) fn(&[Value]) -> Value);
+pub struct NativeFunction(pub fn(&[Value]) -> Value);
 
 impl fmt::Debug for NativeFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -88,25 +88,25 @@ impl PartialEq for NativeFunction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct FunId(usize);
+pub struct FunId(usize);
 
 #[derive(Debug)]
-pub(crate) struct Functions {
+pub struct Functions {
     functions: Vec<Function>,
 }
 
 impl Functions {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             functions: Vec::new(),
         }
     }
 
-    pub(crate) fn lookup(&self, fun_id: FunId) -> &Function {
+    pub fn lookup(&self, fun_id: FunId) -> &Function {
         &self.functions[fun_id.0]
     }
 
-    pub(crate) fn add(&mut self, function: Function) -> FunId {
+    pub fn add(&mut self, function: Function) -> FunId {
         self.functions.push(function);
         FunId(self.functions.len() - 1)
     }

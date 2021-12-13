@@ -1,10 +1,10 @@
-pub(crate) enum LoxError {
+pub enum LoxError {
     Compile,
     Runtime,
 }
 
-pub(crate) struct CompileError(pub(crate) String);
-pub(crate) struct RuntimeError;
+pub struct CompileError(pub String);
+pub struct RuntimeError;
 
-pub(crate) type CompileResult<T> = Result<T, CompileError>;
-pub(crate) type RuntimeResult = Result<(), RuntimeError>;
+pub type CompileResult<T> = Result<T, CompileError>;
+pub type RuntimeResult = Result<(), RuntimeError>;

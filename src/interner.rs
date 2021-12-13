@@ -2,16 +2,16 @@ use rustc_hash::FxHashMap;
 use typed_arena::Arena;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct StrId(usize);
+pub struct StrId(usize);
 
-pub(crate) struct Interner<'a> {
+pub struct Interner<'a> {
     map: FxHashMap<&'a str, StrId>,
     vec: Vec<&'a str>,
     arena: &'a Arena<u8>,
 }
 
 impl Interner<'_> {
-    pub(crate) fn new(arena: &Arena<u8>) -> Interner {
+    pub fn new(arena: &Arena<u8>) -> Interner {
         Interner {
             map: FxHashMap::default(),
             vec: Vec::new(),
@@ -19,7 +19,7 @@ impl Interner<'_> {
         }
     }
 
-    pub(crate) fn intern(&mut self, name: &str) -> StrId {
+    pub fn intern(&mut self, name: &str) -> StrId {
         if let Some(&idx) = self.map.get(name) {
             return idx;
         }
@@ -35,7 +35,7 @@ impl Interner<'_> {
         str_id
     }
 
-    pub(crate) fn lookup(&self, idx: StrId) -> &str {
+    pub fn lookup(&self, idx: StrId) -> &str {
         self.vec[idx.0]
     }
 }

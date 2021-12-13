@@ -4,7 +4,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Value {
+pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
@@ -15,13 +15,13 @@ pub(crate) enum Value {
 }
 
 impl Value {
-    pub(crate) fn is_falsey(&self) -> bool {
+    pub fn is_falsey(&self) -> bool {
         matches!(self, Value::Bool(false) | Value::Nil)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum Op {
+pub enum Op {
     Constant(u8),
     Nil,
     True,
@@ -53,14 +53,14 @@ pub(crate) enum Op {
 }
 
 #[derive(Debug)]
-pub(crate) struct Chunk {
-    pub(crate) code: Vec<Op>,
+pub struct Chunk {
+    pub code: Vec<Op>,
     constants: Vec<Value>,
-    pub(crate) lines: Vec<usize>,
+    pub lines: Vec<usize>,
 }
 
 impl Chunk {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             code: Vec::new(),
             constants: Vec::new(),
@@ -68,20 +68,20 @@ impl Chunk {
         }
     }
 
-    pub(crate) fn read(&self, index: usize) -> Op {
+    pub fn read(&self, index: usize) -> Op {
         self.code[index]
     }
 
-    pub(crate) fn write(&mut self, op: Op, line: usize) {
+    pub fn write(&mut self, op: Op, line: usize) {
         self.code.push(op);
         self.lines.push(line);
     }
 
-    pub(crate) fn read_constant(&self, index: u8) -> Value {
+    pub fn read_constant(&self, index: u8) -> Value {
         self.constants[index as usize].clone()
     }
 
-    pub(crate) fn add_constant(&mut self, value: Value) -> usize {
+    pub fn add_constant(&mut self, value: Value) -> usize {
         self.constants.push(value);
         self.constants.len() - 1
     }

@@ -26,19 +26,19 @@ enum Precedence {
 }
 
 impl Precedence {
-    fn next(&self) -> Precedence {
+    fn next(&self) -> Self {
         match self {
-            Precedence::None => Precedence::Assignment,
-            Precedence::Assignment => Precedence::Or,
-            Precedence::Or => Precedence::And,
-            Precedence::And => Precedence::Equality,
-            Precedence::Equality => Precedence::Comparison,
-            Precedence::Comparison => Precedence::Term,
-            Precedence::Term => Precedence::Factor,
-            Precedence::Factor => Precedence::Unary,
-            Precedence::Unary => Precedence::Call,
-            Precedence::Call => Precedence::Primary,
-            Precedence::Primary => Precedence::None,
+            Self::None => Self::Assignment,
+            Self::Assignment => Self::Or,
+            Self::Or => Self::And,
+            Self::And => Self::Equality,
+            Self::Equality => Self::Comparison,
+            Self::Comparison => Self::Term,
+            Self::Term => Self::Factor,
+            Self::Factor => Self::Unary,
+            Self::Unary => Self::Call,
+            Self::Call => Self::Primary,
+            Self::Primary => Self::None,
         }
     }
 }
@@ -68,7 +68,7 @@ impl<'intern, 'code> ParseFn<'intern, 'code> {
     }
 }
 
-pub(crate) struct Parser<'intern, 'code> {
+pub struct Parser<'intern, 'code> {
     scanner: Scanner<'code>,
     interner: &'code mut Interner<'intern>,
     compiler: Compiler<'code>,
@@ -80,7 +80,7 @@ pub(crate) struct Parser<'intern, 'code> {
 }
 
 impl<'intern, 'code> Parser<'intern, 'code> {
-    pub(crate) fn new(
+    pub fn new(
         interner: &'code mut Interner<'intern>,
         functions: &'code mut Functions,
         code: &'code str,
@@ -97,9 +97,9 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         }
     }
 
-    pub(crate) fn compile(mut self) -> Result<Function, LoxError> {
+    pub fn compile(mut self) -> Result<Function, LoxError> {
         if let Err(compile_err) = self.advance() {
-            self.report_error(compile_err);
+            self.report_error(&compile_err);
         }
 
         while !self
@@ -107,7 +107,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             .map_err(|_| LoxError::Compile)?
         {
             if let Err(compile_err) = self.declaration() {
-                self.report_error(compile_err);
+                self.report_error(&compile_err);
 
                 self.synchronize().map_err(|_| LoxError::Compile)?;
             }
@@ -139,22 +139,22 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         self.previous = self.current;
 
         self.current = self.scanner.scan_token();
-        if !self.check(TokenType::Error) {
-            Ok(())
-        } else {
+        if self.check(TokenType::Error) {
             Err(self.error_at_current(self.current.lexeme))
+        } else {
+            Ok(())
         }
     }
 
     fn error_at_current(&self, message: &str) -> CompileError {
-        self.error_at(self.current, message)
+        Parser::error_at(self.current, message)
     }
 
     fn error(&self, msg: &str) -> CompileError {
-        self.error_at(self.previous, msg)
+        Parser::error_at(self.previous, msg)
     }
 
-    fn error_at(&self, token: Token, message: &str) -> CompileError {
+    fn error_at(token: Token, message: &str) -> CompileError {
         let prefix = format!("[line {}] Error", token.line);
 
         let err_msg = match token.kind {
@@ -168,7 +168,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         CompileError(format!("{}{}{}", prefix, err_msg, suffix))
     }
 
-    fn report_error(&mut self, error: CompileError) {
+    fn report_error(&mut self, error: &CompileError) {
         if !self.panic_mode {
             self.panic_mode = true;
             eprintln!("{}", error.0);
@@ -186,7 +186,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn expression(&mut self) -> CompileResult<()> {
-        self.parse_precedence(Precedence::Assignment)
+        self.parse_precedence(&Precedence::Assignment)
     }
 
     fn number(&mut self) -> CompileResult<()> {
@@ -223,7 +223,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         let end_jump = self.emit_jump(Op::JumpIfFalse);
 
         self.emit_op(Op::Pop);
-        self.parse_precedence(Precedence::And)?;
+        self.parse_precedence(&Precedence::And)?;
 
         self.patch_jump(end_jump)
     }
@@ -235,7 +235,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         self.patch_jump(else_jump)?;
         self.emit_op(Op::Pop);
 
-        self.parse_precedence(Precedence::Or)?;
+        self.parse_precedence(&Precedence::Or)?;
         self.patch_jump(end_jump)
     }
 
@@ -255,7 +255,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn unary(&mut self) -> CompileResult<()> {
         let operator_kind = self.previous.kind;
 
-        self.parse_precedence(Precedence::Unary)?;
+        self.parse_precedence(&Precedence::Unary)?;
 
         match operator_kind {
             TokenType::Bang => self.emit_op(Op::Not),
@@ -266,18 +266,18 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         Ok(())
     }
 
-    fn parse_precedence(&mut self, precedence: Precedence) -> CompileResult<()> {
+    fn parse_precedence(&mut self, precedence: &Precedence) -> CompileResult<()> {
         self.advance()?;
 
         let prefix_rule = Parser::get_rule(self.previous.kind).prefix;
-        let can_assign = precedence <= Precedence::Assignment;
+        let can_assign = precedence <= &Precedence::Assignment;
 
         match prefix_rule {
             Some(f) => f.apply(self, can_assign),
             None => Err(self.error("Expect expression.")),
         }?;
 
-        while precedence <= Parser::get_rule(self.current.kind).precedence {
+        while precedence <= &Parser::get_rule(self.current.kind).precedence {
             self.advance()?;
             let infix_rule = Parser::get_rule(self.previous.kind).infix.unwrap();
             infix_rule.apply(self, can_assign)?;
@@ -294,7 +294,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         let operator_kind = self.previous.kind;
         let rule = Parser::get_rule(operator_kind);
 
-        self.parse_precedence(rule.precedence.next())?;
+        self.parse_precedence(&rule.precedence.next())?;
 
         match operator_kind {
             TokenType::BangEqual => self.emit_ops(Op::Equal, Op::Not),
@@ -647,7 +647,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             return;
         }
 
-        self.emit_op(Op::DefineGlobal(index))
+        self.emit_op(Op::DefineGlobal(index));
     }
 
     fn named_variable(&mut self, name: Token, can_assign: bool) -> CompileResult<()> {
@@ -755,16 +755,16 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn patch_jump(&mut self, offset: usize) -> CompileResult<()> {
         let jump = self.current_chunk().last_index() - offset;
 
-        if let Ok(jump) = u16::try_from(jump) {
-            match self.current_chunk_mut().code[offset] {
-                Op::JumpIfFalse(ref mut o) => *o = jump,
-                Op::Jump(ref mut o) => *o = jump,
-                _ => panic!("Attempting to patch non-jump op"),
-            };
+        match u16::try_from(jump) {
+            Ok(jump) => {
+                match self.current_chunk_mut().code[offset] {
+                    Op::JumpIfFalse(ref mut o) | Op::Jump(ref mut o) => *o = jump,
+                    _ => panic!("Attempting to patch non-jump op"),
+                };
 
-            Ok(())
-        } else {
-            Err(self.error("Too much code to jump over."))
+                Ok(())
+            }
+            Err(_) => Err(self.error("Too much code to jump over.")),
         }
     }
 
@@ -793,12 +793,13 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn emit_loop(&mut self, loop_start: usize) -> CompileResult<()> {
         let offset = self.current_chunk().code.len() - loop_start + 1;
 
-        if let Ok(offset) = u16::try_from(offset) {
-            self.emit_op(Op::Loop(offset));
+        match u16::try_from(offset) {
+            Ok(offset) => {
+                self.emit_op(Op::Loop(offset));
 
-            Ok(())
-        } else {
-            Err(self.error("Loop body too large"))
+                Ok(())
+            }
+            Err(_) => Err(self.error("Loop body too large")),
         }
     }
 
@@ -974,7 +975,7 @@ enum FunctionType {
     Script,
 }
 
-pub(crate) struct Compiler<'code> {
+pub struct Compiler<'code> {
     enclosing: Option<Box<Compiler<'code>>>,
     function: Function,
     function_type: FunctionType,
@@ -983,7 +984,7 @@ pub(crate) struct Compiler<'code> {
 }
 
 impl<'code> Compiler<'code> {
-    pub(crate) const MAX_LOCALS: usize = u8::MAX as usize + 1;
+    pub const MAX_LOCALS: usize = u8::MAX as usize + 1;
 
     fn new(function_name: Option<StrId>, kind: FunctionType) -> Self {
         let mut locals = ArrayVec::new();
@@ -1029,15 +1030,14 @@ impl<'code> Compiler<'code> {
     }
 
     fn resolve_upvalue(&mut self, name: Token) -> Option<Result<u8, &'static str>> {
-        if let Some(enclosing) = self.enclosing.as_mut() {
-            match enclosing.resolve_local(name) {
+        match self.enclosing.as_mut() {
+            Some(enclosing) => match enclosing.resolve_local(name) {
                 Some(res) => Some(res.and_then(|index| self.add_upvalue(index, true))),
                 None => enclosing
                     .resolve_upvalue(name)
                     .map(|res| res.and_then(|index| self.add_upvalue(index, false))),
-            }
-        } else {
-            None
+            },
+            None => None,
         }
     }
 
@@ -1064,10 +1064,15 @@ impl<'code> Compiler<'code> {
 struct Local<'code> {
     name: Token<'code>,
     depth: i32,
+    is_captured: bool,
 }
 
 impl<'code> Local<'code> {
     fn new(name: Token<'code>, depth: i32) -> Self {
-        Self { name, depth }
+        Self {
+            name,
+            depth,
+            is_captured: false,
+        }
     }
 }

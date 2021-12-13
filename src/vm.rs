@@ -10,7 +10,7 @@ use crate::{
     object::{Closure, Functions, NativeFunction, Upvalue},
 };
 
-pub(crate) struct Vm<'intern> {
+pub struct Vm<'intern> {
     frames: ArrayVec<CallFrame, { Vm::FRAMES_MAX }>,
     stack: ArrayVec<Value, { Vm::STACK_MAX }>,
     interner: Interner<'intern>,
@@ -22,7 +22,7 @@ impl<'intern, 'code> Vm<'intern> {
     const FRAMES_MAX: usize = 64;
     const STACK_MAX: usize = Vm::FRAMES_MAX * (u8::MAX as usize + 1);
 
-    pub(crate) fn new(interner: Interner<'intern>) -> Self {
+    pub fn new(interner: Interner<'intern>) -> Self {
         let mut vm = Self {
             frames: ArrayVec::new(),
             stack: ArrayVec::new(),
@@ -35,7 +35,7 @@ impl<'intern, 'code> Vm<'intern> {
         vm
     }
 
-    pub(crate) fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
+    pub fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
         let function = Parser::new(&mut self.interner, &mut self.functions, code).compile()?;
 
         let fun_id = self.functions.add(function);
@@ -47,7 +47,7 @@ impl<'intern, 'code> Vm<'intern> {
             .map_err(|_| LoxError::Runtime)
     }
 
-    pub(crate) fn run(&mut self) -> RuntimeResult {
+    pub fn run(&mut self) -> RuntimeResult {
         loop {
             match self.read_op() {
                 Op::Constant(index) => {
@@ -89,16 +89,13 @@ impl<'intern, 'code> Vm<'intern> {
                 }
                 Op::GetGlobal(index) => {
                     let str_id = self.current_chunk().read_string(index);
-                    match self.globals.get(&str_id) {
-                        Some(value) => {
-                            let value = value.clone();
-                            self.push(value)
-                        }
-                        None => {
-                            let name = self.interner.lookup(str_id);
-                            let msg = format!("Undefined variable '{}'.", name);
-                            return Err(self.runtime_error(&msg));
-                        }
+                    if let Some(value) = self.globals.get(&str_id) {
+                        let value = value.clone();
+                        self.push(value);
+                    } else {
+                        let name = self.interner.lookup(str_id);
+                        let msg = format!("Undefined variable '{}'.", name);
+                        return Err(self.runtime_error(&msg));
                     }
                 }
                 Op::DefineGlobal(index) => {
@@ -121,7 +118,7 @@ impl<'intern, 'code> Vm<'intern> {
                 ),
                 Op::SetUpvalue(slot) => {
                     let location = self.current_closure().upvalues[slot as usize].location;
-                    self.stack[location] = self.peek(0)
+                    self.stack[location] = self.peek(0);
                 }
                 Op::Equal => {
                     let b = self.pop();
@@ -217,20 +214,16 @@ impl<'intern, 'code> Vm<'intern> {
 
                     if self.frames.is_empty() {
                         return Ok(());
-                    } else {
-                        self.stack.truncate(frame.slot);
-                        self.push(result);
                     }
+
+                    self.stack.truncate(frame.slot);
+                    self.push(result);
                 }
             }
         }
     }
 
-    pub(crate) fn binary_op<T>(
-        &mut self,
-        op: fn(f64, f64) -> T,
-        to_val: fn(T) -> Value,
-    ) -> RuntimeResult {
+    pub fn binary_op<T>(&mut self, op: fn(f64, f64) -> T, to_val: fn(T) -> Value) -> RuntimeResult {
         let b = self.pop();
         let a = self.pop();
         match (b, a) {
@@ -243,7 +236,7 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     fn push(&mut self, value: Value) {
-        self.stack.push(value)
+        self.stack.push(value);
     }
 
     fn pop(&mut self) -> Value {
