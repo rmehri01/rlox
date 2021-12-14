@@ -111,3 +111,28 @@ impl Functions {
         FunId(self.functions.len() - 1)
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClosureId(usize);
+
+#[derive(Debug)]
+pub struct Closures {
+    closures: Vec<Closure>,
+}
+
+impl Closures {
+    pub fn new() -> Self {
+        Self {
+            closures: Vec::new(),
+        }
+    }
+
+    pub fn lookup(&self, closure_id: ClosureId) -> &Closure {
+        &self.closures[closure_id.0]
+    }
+
+    pub fn add(&mut self, closure: Closure) -> ClosureId {
+        self.closures.push(closure);
+        ClosureId(self.closures.len() - 1)
+    }
+}

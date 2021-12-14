@@ -7,7 +7,7 @@ use crate::{
     compiler::Parser,
     error::{LoxError, RuntimeError, RuntimeResult},
     interner::{Interner, StrId},
-    object::{Closure, Functions, NativeFunction, Upvalue},
+    object::{Closure, ClosureId, Closures, Functions, NativeFunction, Upvalue},
 };
 
 pub struct Vm<'intern> {
@@ -15,6 +15,7 @@ pub struct Vm<'intern> {
     stack: ArrayVec<Value, { Vm::STACK_MAX }>,
     interner: Interner<'intern>,
     functions: Functions,
+    closures: Closures,
     globals: FxHashMap<StrId, Value>,
 }
 
@@ -28,6 +29,7 @@ impl<'intern, 'code> Vm<'intern> {
             stack: ArrayVec::new(),
             interner,
             functions: Functions::new(),
+            closures: Closures::new(),
             globals: FxHashMap::default(),
         };
 
@@ -42,7 +44,8 @@ impl<'intern, 'code> Vm<'intern> {
         self.stack.push(Value::Function(fun_id));
 
         let closure = Closure::new(fun_id);
-        self.call(closure, 0)
+        let closure_id = self.closures.add(closure);
+        self.call(closure_id, 0)
             .and_then(|_| self.run())
             .map_err(|_| LoxError::Runtime)
     }
@@ -80,7 +83,7 @@ impl<'intern, 'code> Vm<'intern> {
                 }
                 Op::GetLocal(index) => {
                     let slot = self.current_frame().slot + index as usize;
-                    let value = self.stack[slot].clone();
+                    let value = self.stack[slot];
                     self.push(value);
                 }
                 Op::SetLocal(index) => {
@@ -89,13 +92,13 @@ impl<'intern, 'code> Vm<'intern> {
                 }
                 Op::GetGlobal(index) => {
                     let str_id = self.current_chunk().read_string(index);
-                    if let Some(value) = self.globals.get(&str_id) {
-                        let value = value.clone();
-                        self.push(value);
-                    } else {
-                        let name = self.interner.lookup(str_id);
-                        let msg = format!("Undefined variable '{}'.", name);
-                        return Err(self.runtime_error(&msg));
+                    match self.globals.get(&str_id) {
+                        Some(&value) => self.push(value),
+                        None => {
+                            let name = self.interner.lookup(str_id);
+                            let msg = format!("Undefined variable '{}'.", name);
+                            Err(self.runtime_error(&msg))
+                        }
                     }
                 }
                 Op::DefineGlobal(index) => {
@@ -113,9 +116,9 @@ impl<'intern, 'code> Vm<'intern> {
                         return Err(self.runtime_error(&msg));
                     }
                 }
-                Op::GetUpvalue(slot) => self.push(
-                    self.stack[self.current_closure().upvalues[slot as usize].location].clone(),
-                ),
+                Op::GetUpvalue(slot) => {
+                    self.push(self.stack[self.current_closure().upvalues[slot as usize].location])
+                }
                 Op::SetUpvalue(slot) => {
                     let location = self.current_closure().upvalues[slot as usize].location;
                     self.stack[location] = self.peek(0);
@@ -134,14 +137,13 @@ impl<'intern, 'code> Vm<'intern> {
                     let value = self.pop();
                     self.push(Value::Bool(value.is_falsey()));
                 }
-                Op::Negate => {
-                    if let Value::Number(value) = self.peek(0) {
+                Op::Negate => match self.peek(0) {
+                    Value::Number(value) => {
                         self.pop();
                         self.push(Value::Number(-value));
-                    } else {
-                        return Err(self.runtime_error("Operand must be a number."));
                     }
-                }
+                    _ => return Err(self.runtime_error("Operand must be a number.")),
+                },
                 Op::Print => {
                     // TODO: should use display trait somehow
                     match self.pop() {
@@ -159,8 +161,9 @@ impl<'intern, 'code> Vm<'intern> {
                             }
                         }
                         Value::NativeFunction(_) => println!("<native fn>"),
-                        Value::Closure(Closure { fun_id, .. }) => {
+                        Value::Closure(closure_id) => {
                             // TODO: duplicated
+                            let fun_id = self.closures.lookup(closure_id).fun_id;
                             let fn_name = self.functions.lookup(fun_id).name;
                             match fn_name {
                                 Some(str_id) => {
@@ -203,11 +206,13 @@ impl<'intern, 'code> Vm<'intern> {
                             closure.upvalues.push(obj_upvalue);
                         });
 
-                        self.push(Value::Closure(closure));
+                        let closure_id = self.closures.add(closure);
+                        self.push(Value::Closure(closure_id));
                     } else {
                         panic!("Closure should wrap a function");
                     }
                 }
+                Op::CloseUpvalue => todo!(),
                 Op::Return => {
                     let frame = self.frames.pop().unwrap();
                     let result = self.pop();
@@ -252,14 +257,15 @@ impl<'intern, 'code> Vm<'intern> {
 
     fn peek(&self, distance: usize) -> Value {
         let size = self.stack.len();
-        self.stack[size - 1 - distance].clone()
+        self.stack[size - 1 - distance]
     }
 
     fn runtime_error(&self, message: &str) -> RuntimeError {
         eprintln!("{}", message);
 
         self.frames.iter().rev().for_each(|frame| {
-            let function = self.functions.lookup(frame.closure.fun_id);
+            let closure = self.closures.lookup(frame.closure_id);
+            let function = self.functions.lookup(closure.fun_id);
             let line = frame.ip - 1;
 
             match function.name {
@@ -286,7 +292,8 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     fn current_closure(&self) -> &Closure {
-        &self.current_frame().closure
+        let closure_id = self.current_frame().closure_id;
+        self.closures.lookup(closure_id)
     }
 
     fn current_chunk(&self) -> &Chunk {
@@ -297,7 +304,7 @@ impl<'intern, 'code> Vm<'intern> {
 
     fn call_value(&mut self, arg_count: usize) -> RuntimeResult {
         match self.peek(arg_count) {
-            Value::Closure(closure) => self.call(closure, arg_count),
+            Value::Closure(closure_id) => self.call(closure_id, arg_count),
             Value::NativeFunction(native) => {
                 let left = self.stack.len() - arg_count;
                 let result = native.0(&self.stack[left..]);
@@ -308,7 +315,8 @@ impl<'intern, 'code> Vm<'intern> {
         }
     }
 
-    fn call(&mut self, closure: Closure, arg_count: usize) -> RuntimeResult {
+    fn call(&mut self, closure_id: ClosureId, arg_count: usize) -> RuntimeResult {
+        let closure = self.closures.lookup(closure_id);
         let function = self.functions.lookup(closure.fun_id);
 
         if arg_count != function.arity {
@@ -321,7 +329,7 @@ impl<'intern, 'code> Vm<'intern> {
         } else if self.frames.len() == Vm::FRAMES_MAX {
             Err(self.runtime_error("Stack overflow."))
         } else {
-            let frame = CallFrame::new(closure, self.stack.len() - arg_count - 1);
+            let frame = CallFrame::new(closure_id, self.stack.len() - arg_count - 1);
             self.frames.push(frame);
 
             Ok(())
@@ -340,15 +348,15 @@ impl<'intern, 'code> Vm<'intern> {
 
 #[derive(Debug)]
 struct CallFrame {
-    closure: Closure,
+    closure_id: ClosureId,
     ip: usize,
     slot: usize,
 }
 
 impl CallFrame {
-    fn new(closure: Closure, slot: usize) -> Self {
+    fn new(closure_id: ClosureId, slot: usize) -> Self {
         Self {
-            closure,
+            closure_id,
             ip: 0,
             slot,
         }

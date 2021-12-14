@@ -241,10 +241,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
 
     fn make_constant(&mut self, value: Value) -> CompileResult<u8> {
         let constant = self.current_chunk_mut().add_constant(value);
-        match u8::try_from(constant) {
-            Ok(index) => Ok(index),
-            Err(_) => Err(self.error("Too many constants in one chunk.")),
-        }
+        u8::try_from(constant).map_err(|_| self.error("Too many constants in one chunk."))
     }
 
     fn grouping(&mut self) -> CompileResult<()> {
@@ -699,10 +696,17 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn end_scope(&mut self) {
         self.compiler.scope_depth -= 1;
 
-        while !self.compiler.locals.is_empty()
-            && self.compiler.locals.last().unwrap().depth > self.compiler.scope_depth
+        while let Some(local) = self
+            .compiler
+            .locals
+            .last()
+            .filter(|local| local.depth > self.compiler.scope_depth)
         {
-            self.emit_op(Op::Pop);
+            if local.is_captured {
+                self.emit_op(Op::CloseUpvalue);
+            } else {
+                self.emit_op(Op::Pop);
+            }
             self.compiler.locals.pop();
         }
     }
@@ -755,17 +759,12 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn patch_jump(&mut self, offset: usize) -> CompileResult<()> {
         let jump = self.current_chunk().last_index() - offset;
 
-        match u16::try_from(jump) {
-            Ok(jump) => {
-                match self.current_chunk_mut().code[offset] {
-                    Op::JumpIfFalse(ref mut o) | Op::Jump(ref mut o) => *o = jump,
-                    _ => panic!("Attempting to patch non-jump op"),
-                };
-
-                Ok(())
-            }
-            Err(_) => Err(self.error("Too much code to jump over.")),
-        }
+        u16::try_from(jump)
+            .map(|jump| match self.current_chunk_mut().code[offset] {
+                Op::JumpIfFalse(ref mut o) | Op::Jump(ref mut o) => *o = jump,
+                _ => panic!("Attempting to patch non-jump op"),
+            })
+            .map_err(|_| self.error("Too much code to jump over."))
     }
 
     fn emit_jump(&mut self, make_jump: fn(u16) -> Op) -> usize {
@@ -793,14 +792,9 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn emit_loop(&mut self, loop_start: usize) -> CompileResult<()> {
         let offset = self.current_chunk().code.len() - loop_start + 1;
 
-        match u16::try_from(offset) {
-            Ok(offset) => {
-                self.emit_op(Op::Loop(offset));
-
-                Ok(())
-            }
-            Err(_) => Err(self.error("Loop body too large")),
-        }
+        u16::try_from(offset)
+            .map(|offset| self.emit_op(Op::Loop(offset)))
+            .map_err(|_| self.error("Loop body too large"))
     }
 
     fn for_statement(&mut self) -> CompileResult<()> {
@@ -1030,31 +1024,41 @@ impl<'code> Compiler<'code> {
     }
 
     fn resolve_upvalue(&mut self, name: Token) -> Option<Result<u8, &'static str>> {
-        match self.enclosing.as_mut() {
-            Some(enclosing) => match enclosing.resolve_local(name) {
-                Some(res) => Some(res.and_then(|index| self.add_upvalue(index, true))),
-                None => enclosing
-                    .resolve_upvalue(name)
-                    .map(|res| res.and_then(|index| self.add_upvalue(index, false))),
-            },
-            None => None,
-        }
+        self.enclosing.as_mut().and_then(|enclosing| {
+            enclosing
+                .resolve_local(name)
+                .map(|res| {
+                    let index = res?;
+                    enclosing.locals[index as usize].is_captured = true;
+                    Compiler::add_upvalue(&mut self.function.upvalues, index, true)
+                })
+                .or_else(|| {
+                    enclosing.resolve_upvalue(name).map(|res| {
+                        let index = res?;
+                        Compiler::add_upvalue(&mut self.function.upvalues, index, false)
+                    })
+                })
+        })
     }
 
-    fn add_upvalue(&mut self, index: u8, is_local: bool) -> Result<u8, &'static str> {
-        for (i, upvalue) in self.function.upvalues.iter().enumerate() {
+    fn add_upvalue(
+        upvalues: &mut ArrayVec<FnUpvalue, { Compiler::MAX_LOCALS }>,
+        index: u8,
+        is_local: bool,
+    ) -> Result<u8, &'static str> {
+        for (i, upvalue) in upvalues.iter().enumerate() {
             if upvalue.index == index && upvalue.is_local == is_local {
                 return Ok(i.try_into().unwrap());
             }
         }
 
-        let upvalue_count = self.function.upvalues.len();
+        let upvalue_count = upvalues.len();
 
         if upvalue_count == Compiler::MAX_LOCALS {
             Err("Too many closure variables in function.")
         } else {
             let upvalue = FnUpvalue::new(index, is_local);
-            self.function.upvalues.push(upvalue);
+            upvalues.push(upvalue);
 
             Ok(upvalue_count as u8)
         }

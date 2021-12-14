@@ -1,9 +1,9 @@
 use crate::{
     interner::StrId,
-    object::{Closure, FunId, NativeFunction},
+    object::{ClosureId, FunId, NativeFunction},
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
     Bool(bool),
     Nil,
@@ -11,7 +11,7 @@ pub enum Value {
     String(StrId),
     Function(FunId),
     NativeFunction(NativeFunction),
-    Closure(Closure),
+    Closure(ClosureId),
 }
 
 impl Value {
@@ -49,6 +49,7 @@ pub enum Op {
     Loop(u16),
     Call(u8),
     Closure(u8),
+    CloseUpvalue,
     Return,
 }
 
@@ -78,7 +79,7 @@ impl Chunk {
     }
 
     pub fn read_constant(&self, index: u8) -> Value {
-        self.constants[index as usize].clone()
+        self.constants[index as usize]
     }
 
     pub fn add_constant(&mut self, value: Value) -> usize {
