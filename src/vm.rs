@@ -97,7 +97,7 @@ impl<'intern, 'code> Vm<'intern> {
                         None => {
                             let name = self.interner.lookup(str_id);
                             let msg = format!("Undefined variable '{}'.", name);
-                            Err(self.runtime_error(&msg))
+                            return Err(self.runtime_error(&msg));
                         }
                     }
                 }

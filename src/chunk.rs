@@ -91,7 +91,7 @@ impl Chunk {
         if let Value::String(s) = self.read_constant(index) {
             s
         } else {
-            panic!("Constant is not string.")
+            panic!("Constant is not string.");
         }
     }
 
