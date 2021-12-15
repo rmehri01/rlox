@@ -1,6 +1,10 @@
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
-use std::time::{self, SystemTime};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{self, SystemTime},
+};
 
 use crate::{
     chunk::{Chunk, Op, Value},
@@ -49,6 +53,8 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     pub fn run(&mut self) -> Result<(), LoxError> {
+        let mut open_upvalue = None;
+
         loop {
             match self.read_op() {
                 Op::Constant(index) => {
@@ -115,11 +121,30 @@ impl<'intern, 'code> Vm<'intern> {
                     }
                 }
                 Op::GetUpvalue(slot) => {
-                    self.push(self.stack[self.current_closure().upvalues[slot as usize].location])
+                    let value = {
+                        let current_closure = self.current_closure();
+                        let upvalue = current_closure.upvalues[slot as usize].borrow();
+
+                        match upvalue.closed {
+                            Some(value) => value,
+                            None => self.stack[upvalue.location],
+                        }
+                    };
+
+                    self.push(value);
                 }
                 Op::SetUpvalue(slot) => {
-                    let location = self.current_closure().upvalues[slot as usize].location;
-                    self.stack[location] = self.peek(0);
+                    // TODO: messy
+                    let closure_id = self.frames.last().unwrap().closure_id;
+                    let current_closure = self.closures.lookup(closure_id);
+                    let mut upvalue = current_closure.upvalues[slot as usize].borrow_mut();
+                    let value = self.peek(0);
+
+                    if upvalue.closed.is_none() {
+                        self.stack[upvalue.location] = value;
+                    } else {
+                        upvalue.closed = Some(value);
+                    }
                 }
                 Op::Equal => {
                     let b = self.pop();
@@ -196,7 +221,7 @@ impl<'intern, 'code> Vm<'intern> {
                         upvalues.iter().for_each(|upvalue| {
                             let obj_upvalue = if upvalue.is_local {
                                 let location = self.current_frame().slot + upvalue.index as usize;
-                                self.capture_upvalue(location)
+                                Vm::capture_upvalue(&mut open_upvalue, location)
                             } else {
                                 self.current_closure().upvalues[upvalue.index as usize].clone()
                             };
@@ -210,9 +235,14 @@ impl<'intern, 'code> Vm<'intern> {
                         panic!("Closure should wrap a function");
                     }
                 }
-                Op::CloseUpvalue => todo!(),
+                Op::CloseUpvalue => {
+                    self.close_upvalues(&mut open_upvalue, self.stack.len() - 1);
+                    self.pop();
+                }
                 Op::Return => {
                     let frame = self.frames.pop().unwrap();
+                    self.close_upvalues(&mut open_upvalue, frame.slot);
+
                     let result = self.pop();
 
                     if self.frames.is_empty() {
@@ -343,8 +373,50 @@ impl<'intern, 'code> Vm<'intern> {
         self.globals.insert(name, Value::NativeFunction(native));
     }
 
-    fn capture_upvalue(&self, location: usize) -> Upvalue {
-        Upvalue::new(location)
+    fn capture_upvalue(
+        open_upvalue: &mut Option<Rc<RefCell<Upvalue>>>,
+        location: usize,
+    ) -> Rc<RefCell<Upvalue>> {
+        let mut prev_upvalue = None;
+        let mut upvalue = open_upvalue.clone();
+
+        while let Some(inner) = upvalue
+            .clone()
+            .filter(|upvalue| upvalue.borrow().location > location)
+        {
+            upvalue = inner.borrow().next.clone();
+            prev_upvalue = Some(inner);
+        }
+
+        if let Some(inner) = upvalue
+            .as_ref()
+            .filter(|upvalue| upvalue.borrow().location == location)
+        {
+            return inner.clone();
+        }
+
+        let mut created_upvalue = Upvalue::new(location);
+        created_upvalue.next = upvalue;
+        let created_upvalue = Rc::new(RefCell::new(created_upvalue));
+
+        if let Some(inner) = prev_upvalue {
+            inner.borrow_mut().next = Some(created_upvalue.clone());
+        } else {
+            *open_upvalue = Some(created_upvalue.clone());
+        }
+
+        created_upvalue
+    }
+
+    fn close_upvalues(&mut self, open_upvalue: &mut Option<Rc<RefCell<Upvalue>>>, last: usize) {
+        while let Some(upvalue) = open_upvalue
+            .clone()
+            .filter(|upvalue| upvalue.borrow().location >= last)
+        {
+            let value = self.stack[upvalue.borrow().location];
+            upvalue.borrow_mut().closed = Some(value);
+            *open_upvalue = upvalue.borrow_mut().next.take();
+        }
     }
 }
 

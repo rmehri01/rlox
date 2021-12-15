@@ -51,7 +51,6 @@ struct ParseRule<'intern, 'code> {
 
 enum ParseFn<'intern, 'code> {
     Normal(fn(&mut Parser<'intern, 'code>)),
-    CanFail(fn(&mut Parser<'intern, 'code>)),
     Assign(fn(&mut Parser<'intern, 'code>, bool)),
 }
 
@@ -59,7 +58,6 @@ impl<'intern, 'code> ParseFn<'intern, 'code> {
     fn apply(self, parser: &mut Parser<'intern, 'code>, can_assign: bool) {
         match self {
             ParseFn::Normal(f) => f(parser),
-            ParseFn::CanFail(f) => f(parser),
             ParseFn::Assign(f) => f(parser, can_assign),
         }
     }
@@ -291,8 +289,8 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn get_rule(kind: TokenType) -> ParseRule<'intern, 'code> {
         match kind {
             TokenType::LeftParen => ParseRule {
-                prefix: Some(ParseFn::CanFail(Parser::grouping)),
-                infix: Some(ParseFn::CanFail(Parser::call)),
+                prefix: Some(ParseFn::Normal(Parser::grouping)),
+                infix: Some(ParseFn::Normal(Parser::call)),
                 precedence: Precedence::Call,
             },
             TokenType::RightParen => ParseRule {
@@ -321,13 +319,13 @@ impl<'intern, 'code> Parser<'intern, 'code> {
                 precedence: Precedence::None,
             },
             TokenType::Minus => ParseRule {
-                prefix: Some(ParseFn::CanFail(Parser::unary)),
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                prefix: Some(ParseFn::Normal(Parser::unary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Term,
             },
             TokenType::Plus => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Term,
             },
             TokenType::Semicolon => ParseRule {
@@ -337,22 +335,22 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             },
             TokenType::Slash => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Factor,
             },
             TokenType::Star => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Factor,
             },
             TokenType::Bang => ParseRule {
-                prefix: Some(ParseFn::CanFail(Parser::unary)),
+                prefix: Some(ParseFn::Normal(Parser::unary)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::BangEqual => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Equality,
             },
             TokenType::Equal => ParseRule {
@@ -362,27 +360,27 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             },
             TokenType::EqualEqual => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Equality,
             },
             TokenType::Greater => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::GreaterEqual => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::Less => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::LessEqual => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::binary)),
+                infix: Some(ParseFn::Normal(Parser::binary)),
                 precedence: Precedence::Comparison,
             },
             TokenType::Identifier => ParseRule {
@@ -391,18 +389,18 @@ impl<'intern, 'code> Parser<'intern, 'code> {
                 precedence: Precedence::None,
             },
             TokenType::String => ParseRule {
-                prefix: Some(ParseFn::CanFail(Parser::string)),
+                prefix: Some(ParseFn::Normal(Parser::string)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::Number => ParseRule {
-                prefix: Some(ParseFn::CanFail(Parser::number)),
+                prefix: Some(ParseFn::Normal(Parser::number)),
                 infix: None,
                 precedence: Precedence::None,
             },
             TokenType::And => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::and)),
+                infix: Some(ParseFn::Normal(Parser::and)),
                 precedence: Precedence::And,
             },
             TokenType::Class => ParseRule {
@@ -442,7 +440,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
             },
             TokenType::Or => ParseRule {
                 prefix: None,
-                infix: Some(ParseFn::CanFail(Parser::or)),
+                infix: Some(ParseFn::Normal(Parser::or)),
                 precedence: Precedence::Or,
             },
             TokenType::Print => ParseRule {
@@ -928,12 +926,13 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum FunctionType {
     Function,
     Script,
 }
 
+#[derive(Debug)]
 pub struct Compiler<'code> {
     enclosing: Option<Box<Compiler<'code>>>,
     function: Function,
@@ -1028,6 +1027,7 @@ impl<'code> Compiler<'code> {
     }
 }
 
+#[derive(Debug)]
 struct Local<'code> {
     name: Token<'code>,
     depth: i32,

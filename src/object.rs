@@ -1,5 +1,5 @@
 use core::fmt;
-use std::ptr;
+use std::{cell::RefCell, ptr, rc::Rc};
 
 use arrayvec::ArrayVec;
 
@@ -12,7 +12,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Closure {
     pub fun_id: FunId,
-    pub upvalues: Vec<Upvalue>, // TODO: gc id
+    pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
 }
 
 impl PartialEq for Closure {
@@ -33,11 +33,17 @@ impl Closure {
 #[derive(Debug, Clone)]
 pub struct Upvalue {
     pub location: usize,
+    pub next: Option<Rc<RefCell<Upvalue>>>,
+    pub closed: Option<Value>,
 }
 
 impl Upvalue {
     pub fn new(location: usize) -> Self {
-        Self { location }
+        Self {
+            location,
+            next: None,
+            closed: None,
+        }
     }
 }
 
@@ -115,6 +121,7 @@ impl Functions {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClosureId(usize);
 
+// PERF: double lookup and duplication
 #[derive(Debug)]
 pub struct Closures {
     closures: Vec<Closure>,
