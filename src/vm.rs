@@ -5,7 +5,7 @@ use std::time::{self, SystemTime};
 use crate::{
     chunk::{Chunk, Op, Value},
     compiler::Parser,
-    error::{LoxError, RuntimeError, RuntimeResult},
+    error::LoxError,
     interner::{Interner, StrId},
     object::{Closure, ClosureId, Closures, Functions, NativeFunction, Upvalue},
 };
@@ -45,12 +45,10 @@ impl<'intern, 'code> Vm<'intern> {
 
         let closure = Closure::new(fun_id);
         let closure_id = self.closures.add(closure);
-        self.call(closure_id, 0)
-            .and_then(|_| self.run())
-            .map_err(|_| LoxError::Runtime)
+        self.call(closure_id, 0).and_then(|_| self.run())
     }
 
-    pub fn run(&mut self) -> RuntimeResult {
+    pub fn run(&mut self) -> Result<(), LoxError> {
         loop {
             match self.read_op() {
                 Op::Constant(index) => {
@@ -228,7 +226,11 @@ impl<'intern, 'code> Vm<'intern> {
         }
     }
 
-    pub fn binary_op<T>(&mut self, op: fn(f64, f64) -> T, to_val: fn(T) -> Value) -> RuntimeResult {
+    pub fn binary_op<T>(
+        &mut self,
+        op: fn(f64, f64) -> T,
+        to_val: fn(T) -> Value,
+    ) -> Result<(), LoxError> {
         let b = self.pop();
         let a = self.pop();
         match (b, a) {
@@ -260,7 +262,7 @@ impl<'intern, 'code> Vm<'intern> {
         self.stack[size - 1 - distance]
     }
 
-    fn runtime_error(&self, message: &str) -> RuntimeError {
+    fn runtime_error(&self, message: &str) -> LoxError {
         eprintln!("{}", message);
 
         self.frames.iter().rev().for_each(|frame| {
@@ -280,7 +282,7 @@ impl<'intern, 'code> Vm<'intern> {
             };
         });
 
-        RuntimeError
+        LoxError::RuntimeError
     }
 
     fn current_frame(&self) -> &CallFrame {
@@ -302,7 +304,7 @@ impl<'intern, 'code> Vm<'intern> {
         &function.chunk
     }
 
-    fn call_value(&mut self, arg_count: usize) -> RuntimeResult {
+    fn call_value(&mut self, arg_count: usize) -> Result<(), LoxError> {
         match self.peek(arg_count) {
             Value::Closure(closure_id) => self.call(closure_id, arg_count),
             Value::NativeFunction(native) => {
@@ -315,7 +317,7 @@ impl<'intern, 'code> Vm<'intern> {
         }
     }
 
-    fn call(&mut self, closure_id: ClosureId, arg_count: usize) -> RuntimeResult {
+    fn call(&mut self, closure_id: ClosureId, arg_count: usize) -> Result<(), LoxError> {
         let closure = self.closures.lookup(closure_id);
         let function = self.functions.lookup(closure.fun_id);
 

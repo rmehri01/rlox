@@ -1,10 +1,4 @@
 pub enum LoxError {
-    Compile,
-    Runtime,
+    CompileError,
+    RuntimeError,
 }
-
-pub struct CompileError(pub String);
-pub struct RuntimeError;
-
-pub type CompileResult<T> = Result<T, CompileError>;
-pub type RuntimeResult = Result<(), RuntimeError>;
