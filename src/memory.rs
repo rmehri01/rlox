@@ -30,6 +30,10 @@ impl Memory {
         &self.objects[heap_id.0].data
     }
 
+    pub fn lookup_mut(&mut self, heap_id: HeapId) -> &mut ObjData {
+        &mut self.objects[heap_id.0].data
+    }
+
     pub fn intern(&mut self, name: &str) -> HeapId {
         if let Some(&idx) = self.map.get(name) {
             return idx;

@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{cell::RefCell, ptr, rc::Rc};
+use std::ptr;
 
 use crate::{
     chunk::{Chunk, Value},
@@ -26,12 +26,13 @@ pub enum ObjData {
     String(String),
     Function(Function),
     Closure(Closure),
+    Upvalue(Upvalue),
 }
 
 #[derive(Debug, Clone)]
 pub struct Closure {
     pub fun_id: HeapId,
-    pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
+    pub upvalues: Vec<HeapId>,
 }
 
 impl PartialEq for Closure {
@@ -52,7 +53,7 @@ impl Closure {
 #[derive(Debug, Clone)]
 pub struct Upvalue {
     pub location: usize,
-    pub next: Option<Rc<RefCell<Upvalue>>>,
+    pub next: Option<HeapId>,
     pub closed: Option<Value>,
 }
 

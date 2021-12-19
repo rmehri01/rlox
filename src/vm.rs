@@ -1,10 +1,6 @@
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    time::{self, SystemTime},
-};
+use std::time::{self, SystemTime};
 
 use crate::{
     cast,
@@ -20,6 +16,7 @@ pub struct Vm {
     stack: ArrayVec<Value, { Vm::STACK_MAX }>,
     memory: Memory,
     globals: FxHashMap<HeapId, Value>,
+    open_upvalue: Option<HeapId>,
 }
 
 impl<'code> Vm {
@@ -32,6 +29,7 @@ impl<'code> Vm {
             stack: ArrayVec::new(),
             memory,
             globals: FxHashMap::default(),
+            open_upvalue: None,
         };
 
         vm.define_native("clock", NativeFunction(clock_native));
@@ -50,8 +48,6 @@ impl<'code> Vm {
     }
 
     pub fn run(&mut self) -> Result<(), LoxError> {
-        let mut open_upvalue = None;
-
         loop {
             match self.read_op() {
                 Op::Constant(index) => {
@@ -120,7 +116,8 @@ impl<'code> Vm {
                 Op::GetUpvalue(slot) => {
                     let value = {
                         let current_closure = self.current_closure();
-                        let upvalue = current_closure.upvalues[slot as usize].borrow();
+                        let upvalue_id = current_closure.upvalues[slot as usize];
+                        let upvalue = cast!(self.memory.lookup(upvalue_id), ObjData::Upvalue);
 
                         match upvalue.closed {
                             Some(value) => value,
@@ -131,11 +128,9 @@ impl<'code> Vm {
                     self.push(value);
                 }
                 Op::SetUpvalue(slot) => {
-                    // TODO: messy
-                    let closure_id = self.frames.last().unwrap().closure_id;
-                    let current_closure = cast!(self.memory.lookup(closure_id), ObjData::Closure);
-                    let mut upvalue = current_closure.upvalues[slot as usize].borrow_mut();
                     let value = self.peek(0);
+                    let upvalue_id = self.current_closure().upvalues[slot as usize];
+                    let mut upvalue = cast!(self.memory.lookup_mut(upvalue_id), ObjData::Upvalue);
 
                     if upvalue.closed.is_none() {
                         self.stack[upvalue.location] = value;
@@ -221,16 +216,20 @@ impl<'code> Vm {
                     let constant = self.current_chunk().read_constant(index);
 
                     if let Value::Function(fun_id) = constant {
-                        let upvalues =
-                            &cast!(self.memory.lookup(fun_id), ObjData::Function).upvalues;
+                        // TODO: double lookup?
+                        let upvalues = cast!(self.memory.lookup(fun_id), ObjData::Function)
+                            .upvalues
+                            .len();
                         let mut closure = Closure::new(fun_id);
 
-                        upvalues.iter().for_each(|upvalue| {
+                        (0..upvalues).for_each(|upvalue| {
+                            let upvalue = &cast!(self.memory.lookup(fun_id), ObjData::Function)
+                                .upvalues[upvalue];
                             let obj_upvalue = if upvalue.is_local {
                                 let location = self.current_frame().slot + upvalue.index as usize;
-                                Vm::capture_upvalue(&mut open_upvalue, location)
+                                self.capture_upvalue(location)
                             } else {
-                                self.current_closure().upvalues[upvalue.index as usize].clone()
+                                self.current_closure().upvalues[upvalue.index as usize]
                             };
 
                             closure.upvalues.push(obj_upvalue);
@@ -243,12 +242,12 @@ impl<'code> Vm {
                     }
                 }
                 Op::CloseUpvalue => {
-                    self.close_upvalues(&mut open_upvalue, self.stack.len() - 1);
+                    self.close_upvalues(self.stack.len() - 1);
                     self.pop();
                 }
                 Op::Return => {
                     let frame = self.frames.pop().unwrap();
-                    self.close_upvalues(&mut open_upvalue, frame.slot);
+                    self.close_upvalues(frame.slot);
 
                     let result = self.pop();
 
@@ -380,49 +379,45 @@ impl<'code> Vm {
         self.globals.insert(name, Value::NativeFunction(native));
     }
 
-    fn capture_upvalue(
-        open_upvalue: &mut Option<Rc<RefCell<Upvalue>>>,
-        location: usize,
-    ) -> Rc<RefCell<Upvalue>> {
+    fn capture_upvalue(&mut self, location: usize) -> HeapId {
         let mut prev_upvalue = None;
-        let mut upvalue = open_upvalue.clone();
+        let mut upvalue = self.open_upvalue;
 
-        while let Some(inner) = upvalue
-            .clone()
-            .filter(|upvalue| upvalue.borrow().location > location)
-        {
-            upvalue = inner.borrow().next.clone();
+        // TODO: double lookup
+        while let Some(inner) = upvalue.filter(|upvalue| {
+            cast!(self.memory.lookup(*upvalue), ObjData::Upvalue).location > location
+        }) {
+            upvalue = cast!(self.memory.lookup(inner), ObjData::Upvalue).next;
             prev_upvalue = Some(inner);
         }
 
-        if let Some(inner) = upvalue
-            .as_ref()
-            .filter(|upvalue| upvalue.borrow().location == location)
-        {
-            return inner.clone();
+        if let Some(inner) = upvalue.filter(|upvalue| {
+            cast!(self.memory.lookup(*upvalue), ObjData::Upvalue).location == location
+        }) {
+            return inner;
         }
 
         let mut created_upvalue = Upvalue::new(location);
         created_upvalue.next = upvalue;
-        let created_upvalue = Rc::new(RefCell::new(created_upvalue));
+        let upvalue_id = self.memory.alloc(ObjData::Upvalue(created_upvalue));
 
         if let Some(inner) = prev_upvalue {
-            inner.borrow_mut().next = Some(created_upvalue.clone());
+            cast!(self.memory.lookup_mut(inner), ObjData::Upvalue).next = Some(upvalue_id);
         } else {
-            *open_upvalue = Some(created_upvalue.clone());
+            self.open_upvalue = Some(upvalue_id);
         }
 
-        created_upvalue
+        upvalue_id
     }
 
-    fn close_upvalues(&mut self, open_upvalue: &mut Option<Rc<RefCell<Upvalue>>>, last: usize) {
-        while let Some(upvalue) = open_upvalue
-            .clone()
-            .filter(|upvalue| upvalue.borrow().location >= last)
-        {
-            let value = self.stack[upvalue.borrow().location];
-            upvalue.borrow_mut().closed = Some(value);
-            *open_upvalue = upvalue.borrow_mut().next.take();
+    fn close_upvalues(&mut self, last: usize) {
+        while let Some(upvalue) = self.open_upvalue.filter(|upvalue| {
+            cast!(self.memory.lookup(*upvalue), ObjData::Upvalue).location >= last
+        }) {
+            let mut upvalue = cast!(self.memory.lookup_mut(upvalue), ObjData::Upvalue);
+            let value = self.stack[upvalue.location];
+            upvalue.closed = Some(value);
+            self.open_upvalue = upvalue.next.take();
         }
     }
 }
