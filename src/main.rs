@@ -5,24 +5,22 @@ use std::{
 };
 
 use error::LoxError;
-use interner::Interner;
-use typed_arena::Arena;
+use memory::Memory;
 
 use crate::vm::Vm;
 
 mod chunk;
 mod compiler;
 mod error;
-mod interner;
+mod memory;
 mod object;
 mod scanner;
 mod vm;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let arena = Arena::new();
-    let interner = Interner::new(&arena);
-    let mut vm = Vm::new(interner);
+    let memory = Memory::new();
+    let mut vm = Vm::new(memory);
 
     match args.len() {
         1 => repl(&mut vm),

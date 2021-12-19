@@ -1,17 +1,36 @@
 use core::fmt;
 use std::{cell::RefCell, ptr, rc::Rc};
 
-use arrayvec::ArrayVec;
-
 use crate::{
     chunk::{Chunk, Value},
-    compiler::Compiler,
-    interner::StrId,
+    memory::HeapId,
 };
+
+#[derive(Debug)]
+pub struct Object {
+    pub data: ObjData,
+    is_marked: bool,
+}
+
+impl Object {
+    pub fn new(data: ObjData) -> Self {
+        Self {
+            data,
+            is_marked: false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ObjData {
+    String(String),
+    Function(Function),
+    Closure(Closure),
+}
 
 #[derive(Debug, Clone)]
 pub struct Closure {
-    pub fun_id: FunId,
+    pub fun_id: HeapId,
     pub upvalues: Vec<Rc<RefCell<Upvalue>>>,
 }
 
@@ -22,7 +41,7 @@ impl PartialEq for Closure {
 }
 
 impl Closure {
-    pub fn new(fun_id: FunId) -> Self {
+    pub fn new(fun_id: HeapId) -> Self {
         Self {
             fun_id,
             upvalues: Vec::new(),
@@ -51,8 +70,8 @@ impl Upvalue {
 pub struct Function {
     pub arity: usize,
     pub chunk: Chunk,
-    pub name: Option<StrId>,
-    pub upvalues: ArrayVec<FnUpvalue, { Compiler::MAX_LOCALS }>,
+    pub name: Option<HeapId>,
+    pub upvalues: Vec<FnUpvalue>,
 }
 
 #[derive(Debug)]
@@ -68,12 +87,12 @@ impl FnUpvalue {
 }
 
 impl Function {
-    pub fn new(name: Option<StrId>) -> Self {
+    pub fn new(name: Option<HeapId>) -> Self {
         Self {
             arity: 0,
             chunk: Chunk::new(),
             name,
-            upvalues: ArrayVec::new(),
+            upvalues: Vec::new(),
         }
     }
 }
@@ -93,53 +112,13 @@ impl PartialEq for NativeFunction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FunId(usize);
-
-#[derive(Debug)]
-pub struct Functions {
-    functions: Vec<Function>,
-}
-
-impl Functions {
-    pub fn new() -> Self {
-        Self {
-            functions: Vec::new(),
+#[macro_export]
+macro_rules! cast {
+    ($target: expr, $pat: path) => {{
+        if let $pat(a) = $target {
+            a
+        } else {
+            panic!("mismatch variant when cast to {}", stringify!($pat));
         }
-    }
-
-    pub fn lookup(&self, fun_id: FunId) -> &Function {
-        &self.functions[fun_id.0]
-    }
-
-    pub fn add(&mut self, function: Function) -> FunId {
-        self.functions.push(function);
-        FunId(self.functions.len() - 1)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ClosureId(usize);
-
-// PERF: double lookup and duplication
-#[derive(Debug)]
-pub struct Closures {
-    closures: Vec<Closure>,
-}
-
-impl Closures {
-    pub fn new() -> Self {
-        Self {
-            closures: Vec::new(),
-        }
-    }
-
-    pub fn lookup(&self, closure_id: ClosureId) -> &Closure {
-        &self.closures[closure_id.0]
-    }
-
-    pub fn add(&mut self, closure: Closure) -> ClosureId {
-        self.closures.push(closure);
-        ClosureId(self.closures.len() - 1)
-    }
+    }};
 }

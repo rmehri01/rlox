@@ -7,33 +7,30 @@ use std::{
 };
 
 use crate::{
+    cast,
     chunk::{Chunk, Op, Value},
     compiler::Parser,
     error::LoxError,
-    interner::{Interner, StrId},
-    object::{Closure, ClosureId, Closures, Functions, NativeFunction, Upvalue},
+    memory::{HeapId, Memory},
+    object::{Closure, NativeFunction, ObjData, Upvalue},
 };
 
-pub struct Vm<'intern> {
+pub struct Vm {
     frames: ArrayVec<CallFrame, { Vm::FRAMES_MAX }>,
     stack: ArrayVec<Value, { Vm::STACK_MAX }>,
-    interner: Interner<'intern>,
-    functions: Functions,
-    closures: Closures,
-    globals: FxHashMap<StrId, Value>,
+    memory: Memory,
+    globals: FxHashMap<HeapId, Value>,
 }
 
-impl<'intern, 'code> Vm<'intern> {
+impl<'code> Vm {
     const FRAMES_MAX: usize = 64;
     const STACK_MAX: usize = Vm::FRAMES_MAX * (u8::MAX as usize + 1);
 
-    pub fn new(interner: Interner<'intern>) -> Self {
+    pub fn new(memory: Memory) -> Self {
         let mut vm = Self {
             frames: ArrayVec::new(),
             stack: ArrayVec::new(),
-            interner,
-            functions: Functions::new(),
-            closures: Closures::new(),
+            memory,
             globals: FxHashMap::default(),
         };
 
@@ -42,13 +39,13 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     pub fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
-        let function = Parser::new(&mut self.interner, &mut self.functions, code).compile()?;
+        let function = Parser::new(&mut self.memory, code).compile()?;
 
-        let fun_id = self.functions.add(function);
+        let fun_id = self.memory.alloc(ObjData::Function(function));
         self.stack.push(Value::Function(fun_id));
 
         let closure = Closure::new(fun_id);
-        let closure_id = self.closures.add(closure);
+        let closure_id = self.memory.alloc(ObjData::Closure(closure));
         self.call(closure_id, 0).and_then(|_| self.run())
     }
 
@@ -65,10 +62,10 @@ impl<'intern, 'code> Vm<'intern> {
                     let (b, a) = (self.pop(), self.pop());
                     match (a, b) {
                         (Value::String(a), Value::String(b)) => {
-                            let str_a = self.interner.lookup(a);
-                            let str_b = self.interner.lookup(b);
+                            let str_a = cast!(self.memory.lookup(a), ObjData::String);
+                            let str_b = cast!(self.memory.lookup(b), ObjData::String);
                             let result = str_a.to_owned() + str_b;
-                            let result = self.interner.intern(&result);
+                            let result = self.memory.intern(&result);
                             self.push(Value::String(result));
                         }
                         (Value::Number(a), Value::Number(b)) => self.push(Value::Number(a + b)),
@@ -99,7 +96,7 @@ impl<'intern, 'code> Vm<'intern> {
                     match self.globals.get(&str_id) {
                         Some(&value) => self.push(value),
                         None => {
-                            let name = self.interner.lookup(str_id);
+                            let name = cast!(self.memory.lookup(str_id), ObjData::String);
                             let msg = format!("Undefined variable '{}'.", name);
                             return Err(self.runtime_error(&msg));
                         }
@@ -115,7 +112,7 @@ impl<'intern, 'code> Vm<'intern> {
                     let value = self.peek(0);
                     if self.globals.insert(str_id, value).is_none() {
                         self.globals.remove(&str_id);
-                        let name = self.interner.lookup(str_id);
+                        let name = cast!(self.memory.lookup(str_id), ObjData::String);
                         let msg = format!("Undefined variable '{}'.", name);
                         return Err(self.runtime_error(&msg));
                     }
@@ -136,7 +133,7 @@ impl<'intern, 'code> Vm<'intern> {
                 Op::SetUpvalue(slot) => {
                     // TODO: messy
                     let closure_id = self.frames.last().unwrap().closure_id;
-                    let current_closure = self.closures.lookup(closure_id);
+                    let current_closure = cast!(self.memory.lookup(closure_id), ObjData::Closure);
                     let mut upvalue = current_closure.upvalues[slot as usize].borrow_mut();
                     let value = self.peek(0);
 
@@ -173,12 +170,17 @@ impl<'intern, 'code> Vm<'intern> {
                         Value::Bool(value) => println!("{}", value),
                         Value::Nil => println!("nil"),
                         Value::Number(value) => println!("{}", value),
-                        Value::String(str_id) => println!("{}", self.interner.lookup(str_id)),
+                        Value::String(str_id) => {
+                            println!("{}", cast!(self.memory.lookup(str_id), ObjData::String))
+                        }
                         Value::Function(fun_id) => {
-                            let fn_name = self.functions.lookup(fun_id).name;
+                            let fn_name = cast!(self.memory.lookup(fun_id), ObjData::Function).name;
                             match fn_name {
                                 Some(str_id) => {
-                                    println!("<fn {}>", self.interner.lookup(str_id));
+                                    println!(
+                                        "<fn {}>",
+                                        cast!(self.memory.lookup(str_id), ObjData::String)
+                                    );
                                 }
                                 None => panic!("Expected function name"),
                             }
@@ -186,11 +188,15 @@ impl<'intern, 'code> Vm<'intern> {
                         Value::NativeFunction(_) => println!("<native fn>"),
                         Value::Closure(closure_id) => {
                             // TODO: duplicated
-                            let fun_id = self.closures.lookup(closure_id).fun_id;
-                            let fn_name = self.functions.lookup(fun_id).name;
+                            let fun_id =
+                                cast!(self.memory.lookup(closure_id), ObjData::Closure).fun_id;
+                            let fn_name = cast!(self.memory.lookup(fun_id), ObjData::Function).name;
                             match fn_name {
                                 Some(str_id) => {
-                                    println!("<fn {}>", self.interner.lookup(str_id));
+                                    println!(
+                                        "<fn {}>",
+                                        cast!(self.memory.lookup(str_id), ObjData::String)
+                                    );
                                 }
                                 None => panic!("Expected function name"),
                             }
@@ -215,7 +221,8 @@ impl<'intern, 'code> Vm<'intern> {
                     let constant = self.current_chunk().read_constant(index);
 
                     if let Value::Function(fun_id) = constant {
-                        let upvalues = &self.functions.lookup(fun_id).upvalues;
+                        let upvalues =
+                            &cast!(self.memory.lookup(fun_id), ObjData::Function).upvalues;
                         let mut closure = Closure::new(fun_id);
 
                         upvalues.iter().for_each(|upvalue| {
@@ -229,7 +236,7 @@ impl<'intern, 'code> Vm<'intern> {
                             closure.upvalues.push(obj_upvalue);
                         });
 
-                        let closure_id = self.closures.add(closure);
+                        let closure_id = self.memory.alloc(ObjData::Closure(closure));
                         self.push(Value::Closure(closure_id));
                     } else {
                         panic!("Closure should wrap a function");
@@ -296,13 +303,13 @@ impl<'intern, 'code> Vm<'intern> {
         eprintln!("{}", message);
 
         self.frames.iter().rev().for_each(|frame| {
-            let closure = self.closures.lookup(frame.closure_id);
-            let function = self.functions.lookup(closure.fun_id);
+            let closure = cast!(self.memory.lookup(frame.closure_id), ObjData::Closure);
+            let function = cast!(self.memory.lookup(closure.fun_id), ObjData::Function);
             let line = frame.ip - 1;
 
             match function.name {
                 Some(str_id) => {
-                    let function_name = self.interner.lookup(str_id);
+                    let function_name = cast!(self.memory.lookup(str_id), ObjData::String);
                     eprintln!(
                         "[line {}] in {}()",
                         function.chunk.lines[line], function_name
@@ -325,12 +332,12 @@ impl<'intern, 'code> Vm<'intern> {
 
     fn current_closure(&self) -> &Closure {
         let closure_id = self.current_frame().closure_id;
-        self.closures.lookup(closure_id)
+        cast!(self.memory.lookup(closure_id), ObjData::Closure)
     }
 
     fn current_chunk(&self) -> &Chunk {
         let closure = self.current_closure();
-        let function = self.functions.lookup(closure.fun_id);
+        let function = cast!(self.memory.lookup(closure.fun_id), ObjData::Function);
         &function.chunk
     }
 
@@ -347,9 +354,9 @@ impl<'intern, 'code> Vm<'intern> {
         }
     }
 
-    fn call(&mut self, closure_id: ClosureId, arg_count: usize) -> Result<(), LoxError> {
-        let closure = self.closures.lookup(closure_id);
-        let function = self.functions.lookup(closure.fun_id);
+    fn call(&mut self, closure_id: HeapId, arg_count: usize) -> Result<(), LoxError> {
+        let closure = cast!(self.memory.lookup(closure_id), ObjData::Closure);
+        let function = cast!(self.memory.lookup(closure.fun_id), ObjData::Function);
 
         if arg_count != function.arity {
             let message = format!(
@@ -369,7 +376,7 @@ impl<'intern, 'code> Vm<'intern> {
     }
 
     fn define_native(&mut self, name: &str, native: NativeFunction) {
-        let name = self.interner.intern(name);
+        let name = self.memory.intern(name);
         self.globals.insert(name, Value::NativeFunction(native));
     }
 
@@ -422,13 +429,13 @@ impl<'intern, 'code> Vm<'intern> {
 
 #[derive(Debug)]
 struct CallFrame {
-    closure_id: ClosureId,
+    closure_id: HeapId,
     ip: usize,
     slot: usize,
 }
 
 impl CallFrame {
-    fn new(closure_id: ClosureId, slot: usize) -> Self {
+    fn new(closure_id: HeapId, slot: usize) -> Self {
         Self {
             closure_id,
             ip: 0,

@@ -5,8 +5,8 @@ use arrayvec::ArrayVec;
 use crate::{
     chunk::{Chunk, Op, Value},
     error::LoxError,
-    interner::{Interner, StrId},
-    object::{FnUpvalue, Function, Functions},
+    memory::{HeapId, Memory},
+    object::{FnUpvalue, Function, ObjData},
     scanner::{Scanner, Token, TokenType},
 };
 
@@ -43,19 +43,19 @@ impl Precedence {
     }
 }
 
-struct ParseRule<'intern, 'code> {
-    prefix: Option<ParseFn<'intern, 'code>>,
-    infix: Option<ParseFn<'intern, 'code>>,
+struct ParseRule<'code> {
+    prefix: Option<ParseFn<'code>>,
+    infix: Option<ParseFn<'code>>,
     precedence: Precedence,
 }
 
-enum ParseFn<'intern, 'code> {
-    Normal(fn(&mut Parser<'intern, 'code>)),
-    Assign(fn(&mut Parser<'intern, 'code>, bool)),
+enum ParseFn<'code> {
+    Normal(fn(&mut Parser<'code>)),
+    Assign(fn(&mut Parser<'code>, bool)),
 }
 
-impl<'intern, 'code> ParseFn<'intern, 'code> {
-    fn apply(self, parser: &mut Parser<'intern, 'code>, can_assign: bool) {
+impl<'code> ParseFn<'code> {
+    fn apply(self, parser: &mut Parser<'code>, can_assign: bool) {
         match self {
             ParseFn::Normal(f) => f(parser),
             ParseFn::Assign(f) => f(parser, can_assign),
@@ -63,28 +63,22 @@ impl<'intern, 'code> ParseFn<'intern, 'code> {
     }
 }
 
-pub struct Parser<'intern, 'code> {
+pub struct Parser<'code> {
     scanner: Scanner<'code>,
-    interner: &'code mut Interner<'intern>,
+    memory: &'code mut Memory,
     compiler: Compiler<'code>,
-    functions: &'code mut Functions,
     current: Token<'code>,
     previous: Token<'code>,
     had_error: bool,
     panic_mode: bool,
 }
 
-impl<'intern, 'code> Parser<'intern, 'code> {
-    pub fn new(
-        interner: &'code mut Interner<'intern>,
-        functions: &'code mut Functions,
-        code: &'code str,
-    ) -> Self {
+impl<'code> Parser<'code> {
+    pub fn new(memory: &'code mut Memory, code: &'code str) -> Self {
         Self {
             scanner: Scanner::new(code),
-            interner,
+            memory,
             compiler: Compiler::new(None, FunctionType::Script),
-            functions,
             current: Token::new(TokenType::Error, "", 0),
             previous: Token::new(TokenType::Error, "", 0),
             had_error: false,
@@ -189,7 +183,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     fn string(&mut self) {
         let lexeme = self.previous.lexeme;
         let value = &lexeme[1..lexeme.len() - 1];
-        let str_id = self.interner.intern(value);
+        let str_id = self.memory.intern(value);
 
         self.emit_constant(Value::String(str_id))
     }
@@ -286,7 +280,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         };
     }
 
-    fn get_rule(kind: TokenType) -> ParseRule<'intern, 'code> {
+    fn get_rule(kind: TokenType) -> ParseRule<'code> {
         match kind {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(ParseFn::Normal(Parser::grouping)),
@@ -603,7 +597,7 @@ impl<'intern, 'code> Parser<'intern, 'code> {
     }
 
     fn identifier_constant(&mut self, token: Token) -> u8 {
-        let identifier = self.interner.intern(token.lexeme);
+        let identifier = self.memory.intern(token.lexeme);
         self.make_constant(Value::String(identifier))
     }
 
@@ -858,13 +852,13 @@ impl<'intern, 'code> Parser<'intern, 'code> {
         self.block();
 
         let function = self.pop_compiler();
-        let fun_id = self.functions.add(function);
+        let fun_id = self.memory.alloc(ObjData::Function(function));
         let index = self.make_constant(Value::Function(fun_id));
         self.emit_op(Op::Closure(index));
     }
 
     fn push_compiler(&mut self, kind: FunctionType) {
-        let function_name = self.interner.intern(self.previous.lexeme);
+        let function_name = self.memory.intern(self.previous.lexeme);
         let inner = Compiler::new(Some(function_name), kind);
         let enclosing = mem::replace(&mut self.compiler, inner);
         self.compiler.enclosing = Some(Box::new(enclosing));
@@ -944,7 +938,7 @@ pub struct Compiler<'code> {
 impl<'code> Compiler<'code> {
     pub const MAX_LOCALS: usize = u8::MAX as usize + 1;
 
-    fn new(function_name: Option<StrId>, kind: FunctionType) -> Self {
+    fn new(function_name: Option<HeapId>, kind: FunctionType) -> Self {
         let mut locals = ArrayVec::new();
         locals.push(Local::new(Token::new(TokenType::Error, "", 0), 0)); // TODO: initializer
 
@@ -1004,7 +998,7 @@ impl<'code> Compiler<'code> {
     }
 
     fn add_upvalue(
-        upvalues: &mut ArrayVec<FnUpvalue, { Compiler::MAX_LOCALS }>,
+        upvalues: &mut Vec<FnUpvalue>,
         index: u8,
         is_local: bool,
     ) -> Result<u8, &'static str> {

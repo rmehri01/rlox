@@ -1,17 +1,14 @@
-use crate::{
-    interner::StrId,
-    object::{ClosureId, FunId, NativeFunction},
-};
+use crate::{memory::HeapId, object::NativeFunction};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
     Bool(bool),
     Nil,
     Number(f64),
-    String(StrId),
-    Function(FunId),
+    String(HeapId),
+    Function(HeapId),
     NativeFunction(NativeFunction),
-    Closure(ClosureId),
+    Closure(HeapId),
 }
 
 impl Value {
@@ -87,9 +84,9 @@ impl Chunk {
         self.constants.len() - 1
     }
 
-    pub fn read_string(&self, index: u8) -> StrId {
-        if let Value::String(s) = self.read_constant(index) {
-            s
+    pub fn read_string(&self, index: u8) -> HeapId {
+        if let Value::String(str_id) = self.read_constant(index) {
+            str_id
         } else {
             panic!("Constant is not string.");
         }
