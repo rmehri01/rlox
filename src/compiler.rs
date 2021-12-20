@@ -935,7 +935,7 @@ pub struct Compiler<'code> {
     scope_depth: i32,
 }
 
-impl<'code> Compiler<'code> {
+impl Compiler<'_> {
     pub const MAX_LOCALS: usize = u8::MAX as usize + 1;
 
     fn new(function_name: Option<HeapId>, kind: FunctionType) -> Self {

@@ -19,7 +19,7 @@ pub struct Vm {
     open_upvalue: Option<HeapId>,
 }
 
-impl<'code> Vm {
+impl Vm {
     const FRAMES_MAX: usize = 64;
     const STACK_MAX: usize = Vm::FRAMES_MAX * (u8::MAX as usize + 1);
 
@@ -36,7 +36,7 @@ impl<'code> Vm {
         vm
     }
 
-    pub fn interpret(&mut self, code: &'code str) -> Result<(), LoxError> {
+    pub fn interpret(&mut self, code: &str) -> Result<(), LoxError> {
         let function = Parser::new(&mut self.memory, code).compile()?;
 
         let fun_id = self.memory.alloc(ObjData::Function(function));
