@@ -4,6 +4,7 @@ use std::ptr;
 use crate::{
     chunk::{Chunk, Value},
     memory::HeapId,
+    vm::Vm,
 };
 
 #[derive(Debug)]
@@ -99,7 +100,7 @@ impl Function {
 }
 
 #[derive(Clone, Copy)]
-pub struct NativeFunction(pub fn(&[Value]) -> Value);
+pub struct NativeFunction(pub fn(vm: &Vm, &[Value]) -> Value);
 
 impl fmt::Debug for NativeFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

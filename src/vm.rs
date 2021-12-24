@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
-use std::time::{self, SystemTime};
+use std::time::Instant;
 
 use crate::{
     cast,
@@ -17,6 +17,7 @@ pub struct Vm {
     memory: Memory,
     globals: FxHashMap<HeapId, Value>,
     open_upvalue: Option<HeapId>,
+    start_time: Option<Instant>,
 }
 
 impl Vm {
@@ -30,6 +31,7 @@ impl Vm {
             memory,
             globals: FxHashMap::default(),
             open_upvalue: None,
+            start_time: None,
         };
 
         vm.define_native("clock", NativeFunction(clock_native));
@@ -37,6 +39,8 @@ impl Vm {
     }
 
     pub fn interpret(&mut self, code: &str) -> Result<(), LoxError> {
+        self.start_time = Some(Instant::now());
+
         let function = Parser::new(&mut self.memory, code).compile()?;
 
         let fun_id = self.memory.alloc(ObjData::Function(function));
@@ -345,7 +349,7 @@ impl Vm {
             Value::Closure(closure_id) => self.call(closure_id, arg_count),
             Value::NativeFunction(native) => {
                 let left = self.stack.len() - arg_count;
-                let result = native.0(&self.stack[left..]);
+                let result = native.0(&self, &self.stack[left..]);
                 self.push(result);
                 Ok(())
             }
@@ -439,10 +443,12 @@ impl CallFrame {
     }
 }
 
-fn clock_native(_args: &[Value]) -> Value {
-    let start = SystemTime::now();
-    let time = start
-        .duration_since(time::UNIX_EPOCH)
-        .expect("Time went backwards");
-    Value::Number(time.as_secs_f64())
+fn clock_native(vm: &Vm, _args: &[Value]) -> Value {
+    let time = vm
+        .start_time
+        .expect("start time is initiazed")
+        .elapsed()
+        .as_secs_f64();
+
+    Value::Number(time)
 }
