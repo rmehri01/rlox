@@ -6,6 +6,7 @@ use crate::{
     memory::HeapId,
     vm::Vm,
 };
+use enum_as_inner::EnumAsInner;
 
 #[derive(Debug)]
 pub struct Object {
@@ -22,7 +23,7 @@ impl Object {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumAsInner)]
 pub enum ObjData {
     String(String),
     Function(Function),
@@ -112,15 +113,4 @@ impl PartialEq for NativeFunction {
     fn eq(&self, other: &Self) -> bool {
         ptr::eq(self, other)
     }
-}
-
-#[macro_export]
-macro_rules! cast {
-    ($target: expr, $pat: path) => {{
-        if let $pat(a) = $target {
-            a
-        } else {
-            panic!("mismatch variant when cast to {}", stringify!($pat));
-        }
-    }};
 }

@@ -3,7 +3,6 @@ use rustc_hash::FxHashMap;
 use std::time::Instant;
 
 use crate::{
-    cast,
     chunk::{Chunk, Op, Value},
     compiler::Parser,
     error::LoxError,
@@ -62,8 +61,8 @@ impl Vm {
                     let (b, a) = (self.pop(), self.pop());
                     match (a, b) {
                         (Value::String(a), Value::String(b)) => {
-                            let str_a = cast!(self.memory.lookup(a), ObjData::String);
-                            let str_b = cast!(self.memory.lookup(b), ObjData::String);
+                            let str_a = self.memory.deref(a).as_string().unwrap();
+                            let str_b = self.memory.deref(b).as_string().unwrap();
                             let result = str_a.to_owned() + str_b;
                             let result = self.memory.intern(&result);
                             self.push(Value::String(result));
@@ -96,7 +95,7 @@ impl Vm {
                     match self.globals.get(&str_id) {
                         Some(&value) => self.push(value),
                         None => {
-                            let name = cast!(self.memory.lookup(str_id), ObjData::String);
+                            let name = self.memory.deref(str_id).as_string().unwrap();
                             let msg = format!("Undefined variable '{}'.", name);
                             return Err(self.runtime_error(&msg));
                         }
@@ -112,7 +111,7 @@ impl Vm {
                     let value = self.peek(0);
                     if self.globals.insert(str_id, value).is_none() {
                         self.globals.remove(&str_id);
-                        let name = cast!(self.memory.lookup(str_id), ObjData::String);
+                        let name = self.memory.deref(str_id).as_string().unwrap();
                         let msg = format!("Undefined variable '{}'.", name);
                         return Err(self.runtime_error(&msg));
                     }
@@ -121,7 +120,7 @@ impl Vm {
                     let value = {
                         let current_closure = self.current_closure();
                         let upvalue_id = current_closure.upvalues[slot as usize];
-                        let upvalue = cast!(self.memory.lookup(upvalue_id), ObjData::Upvalue);
+                        let upvalue = self.memory.deref(upvalue_id).as_upvalue().unwrap();
 
                         match upvalue.closed {
                             Some(value) => value,
@@ -134,7 +133,7 @@ impl Vm {
                 Op::SetUpvalue(slot) => {
                     let value = self.peek(0);
                     let upvalue_id = self.current_closure().upvalues[slot as usize];
-                    let mut upvalue = cast!(self.memory.lookup_mut(upvalue_id), ObjData::Upvalue);
+                    let mut upvalue = self.memory.deref_mut(upvalue_id).as_upvalue_mut().unwrap();
 
                     if upvalue.closed.is_none() {
                         self.stack[upvalue.location] = value;
@@ -170,15 +169,15 @@ impl Vm {
                         Value::Nil => println!("nil"),
                         Value::Number(value) => println!("{}", value),
                         Value::String(str_id) => {
-                            println!("{}", cast!(self.memory.lookup(str_id), ObjData::String))
+                            println!("{}", self.memory.deref(str_id).as_string().unwrap())
                         }
                         Value::Function(fun_id) => {
-                            let fn_name = cast!(self.memory.lookup(fun_id), ObjData::Function).name;
+                            let fn_name = self.memory.deref(fun_id).as_function().unwrap().name;
                             match fn_name {
                                 Some(str_id) => {
                                     println!(
                                         "<fn {}>",
-                                        cast!(self.memory.lookup(str_id), ObjData::String)
+                                        self.memory.deref(str_id).as_string().unwrap()
                                     );
                                 }
                                 None => panic!("Expected function name"),
@@ -187,14 +186,13 @@ impl Vm {
                         Value::NativeFunction(_) => println!("<native fn>"),
                         Value::Closure(closure_id) => {
                             // TODO: duplicated
-                            let fun_id =
-                                cast!(self.memory.lookup(closure_id), ObjData::Closure).fun_id;
-                            let fn_name = cast!(self.memory.lookup(fun_id), ObjData::Function).name;
+                            let fun_id = self.memory.deref(closure_id).as_closure().unwrap().fun_id;
+                            let fn_name = self.memory.deref(fun_id).as_function().unwrap().name;
                             match fn_name {
                                 Some(str_id) => {
                                     println!(
                                         "<fn {}>",
-                                        cast!(self.memory.lookup(str_id), ObjData::String)
+                                        self.memory.deref(str_id).as_string().unwrap()
                                     );
                                 }
                                 None => panic!("Expected function name"),
@@ -221,14 +219,18 @@ impl Vm {
 
                     if let Value::Function(fun_id) = constant {
                         // TODO: double lookup?
-                        let upvalues = cast!(self.memory.lookup(fun_id), ObjData::Function)
+                        let upvalues = self
+                            .memory
+                            .deref(fun_id)
+                            .as_function()
+                            .unwrap()
                             .upvalues
                             .len();
                         let mut closure = Closure::new(fun_id);
 
                         (0..upvalues).for_each(|upvalue| {
-                            let upvalue = &cast!(self.memory.lookup(fun_id), ObjData::Function)
-                                .upvalues[upvalue];
+                            let upvalue =
+                                &self.memory.deref(fun_id).as_function().unwrap().upvalues[upvalue];
                             let obj_upvalue = if upvalue.is_local {
                                 let location = self.current_frame().slot + upvalue.index as usize;
                                 self.capture_upvalue(location)
@@ -306,13 +308,13 @@ impl Vm {
         eprintln!("{}", message);
 
         self.frames.iter().rev().for_each(|frame| {
-            let closure = cast!(self.memory.lookup(frame.closure_id), ObjData::Closure);
-            let function = cast!(self.memory.lookup(closure.fun_id), ObjData::Function);
+            let closure = self.memory.deref(frame.closure_id).as_closure().unwrap();
+            let function = self.memory.deref(closure.fun_id).as_function().unwrap();
             let line = frame.ip - 1;
 
             match function.name {
                 Some(str_id) => {
-                    let function_name = cast!(self.memory.lookup(str_id), ObjData::String);
+                    let function_name = self.memory.deref(str_id).as_string().unwrap();
                     eprintln!(
                         "[line {}] in {}()",
                         function.chunk.lines[line], function_name
@@ -335,12 +337,12 @@ impl Vm {
 
     fn current_closure(&self) -> &Closure {
         let closure_id = self.current_frame().closure_id;
-        cast!(self.memory.lookup(closure_id), ObjData::Closure)
+        self.memory.deref(closure_id).as_closure().unwrap()
     }
 
     fn current_chunk(&self) -> &Chunk {
         let closure = self.current_closure();
-        let function = cast!(self.memory.lookup(closure.fun_id), ObjData::Function);
+        let function = self.memory.deref(closure.fun_id).as_function().unwrap();
         &function.chunk
     }
 
@@ -349,7 +351,7 @@ impl Vm {
             Value::Closure(closure_id) => self.call(closure_id, arg_count),
             Value::NativeFunction(native) => {
                 let left = self.stack.len() - arg_count;
-                let result = native.0(&self, &self.stack[left..]);
+                let result = native.0(self, &self.stack[left..]);
                 self.push(result);
                 Ok(())
             }
@@ -358,8 +360,8 @@ impl Vm {
     }
 
     fn call(&mut self, closure_id: HeapId, arg_count: usize) -> Result<(), LoxError> {
-        let closure = cast!(self.memory.lookup(closure_id), ObjData::Closure);
-        let function = cast!(self.memory.lookup(closure.fun_id), ObjData::Function);
+        let closure = self.memory.deref(closure_id).as_closure().unwrap();
+        let function = self.memory.deref(closure.fun_id).as_function().unwrap();
 
         if arg_count != function.arity {
             let message = format!(
@@ -388,15 +390,15 @@ impl Vm {
         let mut upvalue = self.open_upvalue;
 
         // TODO: double lookup
-        while let Some(inner) = upvalue.filter(|upvalue| {
-            cast!(self.memory.lookup(*upvalue), ObjData::Upvalue).location > location
-        }) {
-            upvalue = cast!(self.memory.lookup(inner), ObjData::Upvalue).next;
+        while let Some(inner) = upvalue
+            .filter(|upvalue| self.memory.deref(*upvalue).as_upvalue().unwrap().location > location)
+        {
+            upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
             prev_upvalue = Some(inner);
         }
 
         if let Some(inner) = upvalue.filter(|upvalue| {
-            cast!(self.memory.lookup(*upvalue), ObjData::Upvalue).location == location
+            self.memory.deref(*upvalue).as_upvalue().unwrap().location == location
         }) {
             return inner;
         }
@@ -406,7 +408,7 @@ impl Vm {
         let upvalue_id = self.memory.alloc(ObjData::Upvalue(created_upvalue));
 
         if let Some(inner) = prev_upvalue {
-            cast!(self.memory.lookup_mut(inner), ObjData::Upvalue).next = Some(upvalue_id);
+            self.memory.deref_mut(inner).as_upvalue_mut().unwrap().next = Some(upvalue_id);
         } else {
             self.open_upvalue = Some(upvalue_id);
         }
@@ -415,10 +417,11 @@ impl Vm {
     }
 
     fn close_upvalues(&mut self, last: usize) {
-        while let Some(upvalue) = self.open_upvalue.filter(|upvalue| {
-            cast!(self.memory.lookup(*upvalue), ObjData::Upvalue).location >= last
-        }) {
-            let mut upvalue = cast!(self.memory.lookup_mut(upvalue), ObjData::Upvalue);
+        while let Some(upvalue) = self
+            .open_upvalue
+            .filter(|upvalue| self.memory.deref(*upvalue).as_upvalue().unwrap().location >= last)
+        {
+            let mut upvalue = self.memory.deref_mut(upvalue).as_upvalue_mut().unwrap();
             let value = self.stack[upvalue.location];
             upvalue.closed = Some(value);
             self.open_upvalue = upvalue.next.take();

@@ -26,11 +26,11 @@ impl Memory {
         HeapId(self.objects.len() - 1)
     }
 
-    pub fn lookup(&self, heap_id: HeapId) -> &ObjData {
+    pub fn deref(&self, heap_id: HeapId) -> &ObjData {
         &self.objects[heap_id.0].data
     }
 
-    pub fn lookup_mut(&mut self, heap_id: HeapId) -> &mut ObjData {
+    pub fn deref_mut(&mut self, heap_id: HeapId) -> &mut ObjData {
         &mut self.objects[heap_id.0].data
     }
 
