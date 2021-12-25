@@ -167,7 +167,7 @@ impl<'code> Parser<'code> {
             .previous
             .lexeme
             .parse()
-            .expect("Parsed value is not a double");
+            .expect("parsed value to be a double");
         self.emit_constant(Value::Number(value))
     }
 
@@ -250,7 +250,9 @@ impl<'code> Parser<'code> {
 
         while precedence <= &Parser::get_rule(self.current.kind).precedence {
             self.advance();
-            let infix_rule = Parser::get_rule(self.previous.kind).infix.unwrap();
+            let infix_rule = Parser::get_rule(self.previous.kind)
+                .infix
+                .expect("infix parse rule");
             infix_rule.apply(self, can_assign);
         }
 
@@ -961,7 +963,7 @@ impl Compiler<'_> {
 
     fn mark_initialized(&mut self) {
         if self.scope_depth != 0 {
-            let last = self.locals.last_mut().unwrap();
+            let last = self.locals.last_mut().expect("non-empty locals");
             last.depth = self.scope_depth;
         }
     }

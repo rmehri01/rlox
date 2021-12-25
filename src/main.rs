@@ -38,9 +38,7 @@ fn repl(vm: &mut Vm) {
         io::stdout().flush().unwrap();
 
         let mut line = String::new();
-        io::stdin()
-            .read_line(&mut line)
-            .expect("Unable to read line from the REPL");
+        io::stdin().read_line(&mut line).unwrap();
 
         if line.is_empty() {
             break;

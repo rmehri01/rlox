@@ -250,7 +250,7 @@ impl Vm {
                     self.pop();
                 }
                 Op::Return => {
-                    let frame = self.frames.pop().unwrap();
+                    let frame = self.frames.pop().expect("non-empty call stack");
                     self.close_upvalues(frame.slot);
 
                     let result = self.pop();
@@ -287,7 +287,7 @@ impl Vm {
     }
 
     fn pop(&mut self) -> Value {
-        self.stack.pop().expect("empty stack")
+        self.stack.pop().expect("non-empty value stack")
     }
 
     fn read_op(&mut self) -> Op {
@@ -326,11 +326,11 @@ impl Vm {
     }
 
     fn current_frame(&self) -> &CallFrame {
-        self.frames.last().unwrap()
+        self.frames.last().expect("non-empty call stack")
     }
 
     fn current_frame_mut(&mut self) -> &mut CallFrame {
-        self.frames.last_mut().unwrap()
+        self.frames.last_mut().expect("non-empty call stack")
     }
 
     fn current_closure(&self) -> &Closure {
