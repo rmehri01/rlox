@@ -1,12 +1,13 @@
 use core::fmt;
 use std::ptr;
 
+use enum_as_inner::EnumAsInner;
+
 use crate::{
     chunk::{Chunk, Value},
     memory::HeapId,
     vm::Vm,
 };
-use enum_as_inner::EnumAsInner;
 
 #[derive(Debug)]
 pub struct Object {

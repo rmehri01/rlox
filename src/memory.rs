@@ -1,5 +1,6 @@
-use crate::object::{ObjData, Object};
 use rustc_hash::FxHashMap;
+
+use crate::object::{ObjData, Object};
 
 // TODO: try arena
 pub struct Memory {

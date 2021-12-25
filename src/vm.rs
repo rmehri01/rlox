@@ -1,6 +1,7 @@
+use std::time::Instant;
+
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
-use std::time::Instant;
 
 use crate::{
     chunk::{Chunk, Op, Value},
