@@ -30,6 +30,7 @@ pub enum ObjData {
     Function(Function),
     Closure(Closure),
     Upvalue(Upvalue),
+    Class(Class),
     None,
 }
 
@@ -114,5 +115,16 @@ impl fmt::Debug for NativeFunction {
 impl PartialEq for NativeFunction {
     fn eq(&self, other: &Self) -> bool {
         ptr::eq(self, other)
+    }
+}
+
+#[derive(Debug)]
+pub struct Class {
+    pub name: HeapId,
+}
+
+impl Class {
+    pub fn new(name: HeapId) -> Self {
+        Self { name }
     }
 }

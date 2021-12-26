@@ -114,6 +114,9 @@ impl Memory {
                     self.mark_value(value)
                 }
             }
+            ObjData::Class(class) => {
+                self.mark_object(class.name);
+            }
             _ => {}
         }
 

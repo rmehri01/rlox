@@ -9,6 +9,7 @@ pub enum Value {
     Function(HeapId),
     NativeFunction(NativeFunction),
     Closure(HeapId),
+    Class(HeapId),
 }
 
 impl Value {
@@ -48,6 +49,7 @@ pub enum Op {
     Closure(u8),
     CloseUpvalue,
     Return,
+    Class(u8),
 }
 
 #[derive(Debug)]

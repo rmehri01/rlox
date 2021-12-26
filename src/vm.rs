@@ -8,7 +8,7 @@ use crate::{
     compiler::Parser,
     error::LoxError,
     memory::{HeapId, Memory},
-    object::{Closure, NativeFunction, ObjData, Upvalue},
+    object::{Class, Closure, NativeFunction, ObjData, Upvalue},
 };
 
 pub struct Vm {
@@ -199,6 +199,11 @@ impl Vm {
                                 None => panic!("Expected function name"),
                             }
                         }
+                        Value::Class(class_id) => {
+                            let name_id = self.memory.deref(class_id).as_class().unwrap().name;
+                            let class_name = self.memory.deref(name_id).as_string().unwrap();
+                            println!("{}", class_name);
+                        }
                     };
                 }
                 Op::Jump(offset) => {
@@ -264,6 +269,12 @@ impl Vm {
 
                     self.stack.truncate(frame.slot);
                     self.push(result);
+                }
+                Op::Class(index) => {
+                    let class_name = self.current_chunk().read_string(index);
+                    let class = Class::new(class_name);
+                    let class_id = self.alloc(ObjData::Class(class));
+                    self.stack.push(Value::Class(class_id));
                 }
             }
         }
