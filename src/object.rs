@@ -12,7 +12,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Object {
     pub data: ObjData,
-    is_marked: bool,
+    pub is_marked: bool,
 }
 
 impl Object {
@@ -30,6 +30,7 @@ pub enum ObjData {
     Function(Function),
     Closure(Closure),
     Upvalue(Upvalue),
+    None,
 }
 
 #[derive(Debug, Clone)]

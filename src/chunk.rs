@@ -53,7 +53,7 @@ pub enum Op {
 #[derive(Debug)]
 pub struct Chunk {
     pub code: Vec<Op>,
-    constants: Vec<Value>,
+    pub constants: Vec<Value>,
     pub lines: Vec<usize>,
 }
 

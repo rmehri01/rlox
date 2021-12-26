@@ -47,7 +47,7 @@ impl Vm {
         self.stack.push(Value::Function(fun_id));
 
         let closure = Closure::new(fun_id);
-        let closure_id = self.memory.alloc(ObjData::Closure(closure));
+        let closure_id = self.alloc(ObjData::Closure(closure));
         self.call(closure_id, 0).and_then(|_| self.run())
     }
 
@@ -65,7 +65,7 @@ impl Vm {
                             let str_a = self.memory.deref(a).as_string().unwrap();
                             let str_b = self.memory.deref(b).as_string().unwrap();
                             let result = str_a.to_owned() + str_b;
-                            let result = self.memory.intern(&result);
+                            let result = self.intern(&result);
                             self.push(Value::String(result));
                         }
                         (Value::Number(a), Value::Number(b)) => self.push(Value::Number(a + b)),
@@ -242,7 +242,7 @@ impl Vm {
                             closure.upvalues.push(obj_upvalue);
                         });
 
-                        let closure_id = self.memory.alloc(ObjData::Closure(closure));
+                        let closure_id = self.alloc(ObjData::Closure(closure));
                         self.push(Value::Closure(closure_id));
                     } else {
                         panic!("Closure should wrap a function");
@@ -382,7 +382,7 @@ impl Vm {
     }
 
     fn define_native(&mut self, name: &str, native: NativeFunction) {
-        let name = self.memory.intern(name);
+        let name = self.intern(name);
         self.globals.insert(name, Value::NativeFunction(native));
     }
 
@@ -406,7 +406,7 @@ impl Vm {
 
         let mut created_upvalue = Upvalue::new(location);
         created_upvalue.next = upvalue;
-        let upvalue_id = self.memory.alloc(ObjData::Upvalue(created_upvalue));
+        let upvalue_id = self.alloc(ObjData::Upvalue(created_upvalue));
 
         if let Some(inner) = prev_upvalue {
             self.memory.deref_mut(inner).as_upvalue_mut().unwrap().next = Some(upvalue_id);
@@ -426,6 +426,48 @@ impl Vm {
             let value = self.stack[upvalue.location];
             upvalue.closed = Some(value);
             self.open_upvalue = upvalue.next.take();
+        }
+    }
+
+    fn alloc(&mut self, data: ObjData) -> HeapId {
+        if self.memory.should_gc() {
+            self.mark_and_sweep();
+        }
+
+        self.memory.alloc(data)
+    }
+
+    fn intern(&mut self, name: &str) -> HeapId {
+        if self.memory.should_gc() {
+            self.mark_and_sweep();
+        }
+
+        self.memory.intern(name)
+    }
+
+    fn mark_and_sweep(&mut self) {
+        self.mark_roots();
+        self.memory.collect_garbage();
+    }
+
+    fn mark_roots(&mut self) {
+        self.stack
+            .iter()
+            .for_each(|value| self.memory.mark_value(*value));
+
+        self.globals.iter().for_each(|(object, value)| {
+            self.memory.mark_object(*object);
+            self.memory.mark_value(*value);
+        });
+
+        self.frames.iter().for_each(|frame| {
+            self.memory.mark_object(frame.closure_id);
+        });
+
+        let mut upvalue = self.open_upvalue;
+        while let Some(inner) = upvalue {
+            self.memory.mark_object(inner);
+            upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
         }
     }
 }
