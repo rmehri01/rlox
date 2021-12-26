@@ -82,10 +82,9 @@ impl Memory {
 
         match &obj_data {
             ObjData::Function(function) => {
-                function
-                    .name
-                    .iter()
-                    .for_each(|heap_id| self.mark_object(*heap_id));
+                if let Some(heap_id) = function.name {
+                    self.mark_object(heap_id)
+                }
 
                 function
                     .chunk
@@ -100,10 +99,11 @@ impl Memory {
                     .iter()
                     .for_each(|heap_id| self.mark_object(*heap_id));
             }
-            ObjData::Upvalue(upvalue) => upvalue
-                .closed
-                .iter()
-                .for_each(|value| self.mark_value(*value)),
+            ObjData::Upvalue(upvalue) => {
+                if let Some(value) = upvalue.closed {
+                    self.mark_value(value)
+                }
+            }
             _ => {}
         }
 
