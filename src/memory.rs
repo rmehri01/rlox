@@ -13,19 +13,26 @@ pub struct Memory {
     heap: Vec<Object>,
     free_list: Vec<HeapId>,
     gray_stack: VecDeque<HeapId>,
+    bytes_allocated: usize,
+    next_gc: usize,
 }
 
 impl Memory {
+    const HEAP_GROW_FACTOR: usize = 2;
+
     pub fn new() -> Self {
         Self {
             strings: FxHashMap::default(),
             heap: Vec::new(),
             free_list: Vec::new(),
             gray_stack: VecDeque::new(),
+            bytes_allocated: 0,
+            next_gc: 1024 * 1024,
         }
     }
 
     pub fn alloc(&mut self, data: ObjData) -> HeapId {
+        self.bytes_allocated += mem::size_of_val(&data);
         let object = Object::new(data);
 
         if let Some(heap_id) = self.free_list.pop() {
@@ -57,10 +64,11 @@ impl Memory {
     }
 
     pub fn should_gc(&self) -> bool {
-        true
+        self.bytes_allocated > self.next_gc
     }
 
     fn free(&mut self, heap_id: HeapId) {
+        self.bytes_allocated -= mem::size_of_val(&self.heap[heap_id.0].data);
         self.free_list.push(heap_id);
     }
 
@@ -68,6 +76,8 @@ impl Memory {
         self.trace_references();
         self.remove_white_strings();
         self.sweep();
+
+        self.next_gc = self.bytes_allocated * Memory::HEAP_GROW_FACTOR;
     }
 
     fn trace_references(&mut self) {
