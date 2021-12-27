@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, mem};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    mem,
+};
 
 use rustc_hash::FxHashMap;
 
@@ -11,9 +14,9 @@ use crate::{
 pub struct Memory {
     strings: FxHashMap<String, HeapId>,
     heap: Vec<Object>,
-    free_list: Vec<HeapId>,
+    free_list: BTreeSet<HeapId>,
     gray_stack: VecDeque<HeapId>,
-    bytes_allocated: usize,
+    objects_allocated: usize,
     next_gc: usize,
 }
 
@@ -24,18 +27,18 @@ impl Memory {
         Self {
             strings: FxHashMap::default(),
             heap: Vec::new(),
-            free_list: Vec::new(),
+            free_list: BTreeSet::new(),
             gray_stack: VecDeque::new(),
-            bytes_allocated: 0,
-            next_gc: 1024 * 1024,
+            objects_allocated: 0,
+            next_gc: 8 * 8,
         }
     }
 
     pub fn alloc(&mut self, data: ObjData) -> HeapId {
-        self.bytes_allocated += mem::size_of_val(&data);
+        self.objects_allocated += 1;
         let object = Object::new(data);
 
-        if let Some(heap_id) = self.free_list.pop() {
+        if let Some(heap_id) = self.free_list.pop_first() {
             self.heap[heap_id.0] = object;
             heap_id
         } else {
@@ -64,12 +67,12 @@ impl Memory {
     }
 
     pub fn should_gc(&self) -> bool {
-        self.bytes_allocated > self.next_gc
+        self.objects_allocated > self.next_gc
     }
 
     fn free(&mut self, heap_id: HeapId) {
-        self.bytes_allocated -= mem::size_of_val(&self.heap[heap_id.0].data);
-        self.free_list.push(heap_id);
+        self.objects_allocated -= 1;
+        self.free_list.insert(heap_id);
     }
 
     pub fn collect_garbage(&mut self) {
@@ -77,7 +80,7 @@ impl Memory {
         self.remove_white_strings();
         self.sweep();
 
-        self.next_gc = self.bytes_allocated * Memory::HEAP_GROW_FACTOR;
+        self.next_gc = self.objects_allocated * Memory::HEAP_GROW_FACTOR;
     }
 
     fn trace_references(&mut self) {
@@ -148,17 +151,24 @@ impl Memory {
         (0..self.heap.len()).for_each(|idx| {
             let object = &mut self.heap[idx];
 
-            if object.is_marked {
-                object.is_marked = false;
-            } else {
-                self.free(HeapId(idx));
+            if !self.free_list.contains(&HeapId(idx)) {
+                if object.is_marked {
+                    object.is_marked = false;
+                } else {
+                    self.free(HeapId(idx));
+                }
             }
         });
     }
 
     pub fn mark_value(&mut self, value: Value) {
         match value {
-            Value::String(heap_id) | Value::Function(heap_id) | Value::Closure(heap_id) => {
+            Value::String(heap_id)
+            | Value::Function(heap_id)
+            | Value::Closure(heap_id)
+            | Value::Class(heap_id)
+            | Value::Instance(heap_id)
+            | Value::BoundMethod(heap_id) => {
                 self.mark_object(heap_id);
             }
             _ => {}
@@ -173,7 +183,6 @@ impl Memory {
         }
 
         object.is_marked = true;
-
         self.gray_stack.push_back(heap_id);
     }
 }

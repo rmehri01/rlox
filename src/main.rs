@@ -1,3 +1,5 @@
+#![feature(map_first_last)]
+
 use std::{
     env, fs,
     io::{self, Write},
