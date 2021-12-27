@@ -142,6 +142,45 @@ impl Vm {
                         upvalue.closed = Some(value);
                     }
                 }
+                Op::GetProperty(index) => {
+                    if let Value::Instance(instance_id) = self.peek(0) {
+                        let name_id = self.current_chunk().read_string(index);
+                        let instance = self.memory.deref(instance_id).as_instance().unwrap();
+                        let value = instance.fields.get(&name_id);
+
+                        match value {
+                            Some(&value) => {
+                                self.pop();
+                                self.push(value);
+                            }
+                            None => {
+                                let name = self.memory.deref(name_id).as_string().unwrap();
+                                let message = format!("Undefined property '{}'.", name);
+                                return Err(self.runtime_error(&message));
+                            }
+                        }
+                    } else {
+                        return Err(self.runtime_error("Only instances have properties."));
+                    }
+                }
+                Op::SetProperty(index) => {
+                    if let Value::Instance(instance_id) = self.peek(1) {
+                        let name = self.current_chunk().read_string(index);
+                        let value = self.pop();
+                        let instance = self
+                            .memory
+                            .deref_mut(instance_id)
+                            .as_instance_mut()
+                            .unwrap();
+
+                        instance.fields.insert(name, value);
+
+                        self.pop();
+                        self.push(value);
+                    } else {
+                        return Err(self.runtime_error("Only instances have fields."));
+                    }
+                }
                 Op::Equal => {
                     let b = self.pop();
                     let a = self.pop();

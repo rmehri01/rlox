@@ -225,6 +225,18 @@ impl<'code> Parser<'code> {
         self.consume(TokenType::RightParen, "Expect ')' after expression.")
     }
 
+    fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::Identifier, "Expect property name after '.'.");
+        let name = self.identifier_constant(self.previous);
+
+        if can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_op(Op::SetProperty(name));
+        } else {
+            self.emit_op(Op::GetProperty(name));
+        }
+    }
+
     fn unary(&mut self) {
         let operator_kind = self.previous.kind;
 
@@ -311,8 +323,8 @@ impl<'code> Parser<'code> {
             },
             TokenType::Dot => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(ParseFn::Assign(Parser::dot)),
+                precedence: Precedence::Call,
             },
             TokenType::Minus => ParseRule {
                 prefix: Some(ParseFn::Normal(Parser::unary)),

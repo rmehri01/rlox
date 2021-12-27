@@ -33,6 +33,8 @@ pub enum Op {
     SetGlobal(u8),
     GetUpvalue(u8),
     SetUpvalue(u8),
+    GetProperty(u8),
+    SetProperty(u8),
     Equal,
     Greater,
     Less,
