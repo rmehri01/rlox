@@ -17,6 +17,7 @@ pub struct Vm {
     memory: Memory,
     globals: FxHashMap<HeapId, Value>,
     open_upvalue: Option<HeapId>,
+    init_string: HeapId,
     start_time: Option<Instant>,
 }
 
@@ -24,13 +25,17 @@ impl Vm {
     const FRAMES_MAX: usize = 64;
     const STACK_MAX: usize = Vm::FRAMES_MAX * (u8::MAX as usize + 1);
 
-    pub fn new(memory: Memory) -> Self {
+    pub fn new() -> Self {
+        let mut memory = Memory::new();
+        let init_string = memory.intern("init");
+
         let mut vm = Self {
             frames: ArrayVec::new(),
             stack: ArrayVec::new(),
             memory,
             globals: FxHashMap::default(),
             open_upvalue: None,
+            init_string,
             start_time: None,
         };
 
@@ -378,7 +383,19 @@ impl Vm {
                 let location = self.stack.len() - arg_count - 1;
                 self.stack[location] = Value::Instance(instance_id);
 
-                Ok(())
+                let class = self.memory.deref(class_id).as_class().unwrap();
+                if let Some(&initializer) = class.methods.get(&self.init_string) {
+                    if let Value::Closure(closure_id) = initializer {
+                        self.call(closure_id, arg_count)
+                    } else {
+                        panic!("Initializer should be a closure")
+                    }
+                } else if arg_count != 0 {
+                    let message = format!("Expected 0 arguments but got {}.", arg_count);
+                    Err(self.runtime_error(&message))
+                } else {
+                    Ok(())
+                }
             }
             Value::Closure(closure_id) => self.call(closure_id, arg_count),
             Value::NativeFunction(native) => {
@@ -509,6 +526,8 @@ impl Vm {
             self.memory.mark_object(inner);
             upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
         }
+
+        self.memory.mark_object(self.init_string);
     }
 
     fn bind_method(&mut self, class: HeapId, name_id: HeapId) -> Result<(), LoxError> {

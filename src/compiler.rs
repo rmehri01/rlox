@@ -175,7 +175,7 @@ impl<'code> Parser<'code> {
 
     fn this(&mut self) {
         if self.current_class.is_none() {
-            self.error("Cannot use 'this' outside of a class.");
+            self.error("Can't use 'this' outside of a class.");
         } else {
             self.variable(false);
         }
@@ -874,8 +874,13 @@ impl<'code> Parser<'code> {
         self.consume(TokenType::Identifier, "Expect method name.");
 
         let name_constant = self.identifier_constant(self.previous);
-        self.function(FunctionType::Method);
+        let function_type = if self.previous.lexeme == "init" {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
 
+        self.function(function_type);
         self.emit_op(Op::Method(name_constant));
     }
 
@@ -962,7 +967,12 @@ impl<'code> Parser<'code> {
     }
 
     fn emit_return(&mut self) {
-        self.emit_op(Op::Nil);
+        if self.compiler.function_type == FunctionType::Initializer {
+            self.emit_op(Op::GetLocal(0));
+        } else {
+            self.emit_op(Op::Nil);
+        }
+
         self.emit_op(Op::Return);
     }
 
@@ -974,6 +984,10 @@ impl<'code> Parser<'code> {
         if self.matches(TokenType::Semicolon) {
             self.emit_return();
         } else {
+            if self.compiler.function_type == FunctionType::Initializer {
+                self.error("Can't return a value from an initializer.");
+            }
+
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after return value.");
             self.emit_op(Op::Return);
@@ -984,6 +998,7 @@ impl<'code> Parser<'code> {
 #[derive(Debug, PartialEq)]
 enum FunctionType {
     Function,
+    Initializer,
     Method,
     Script,
 }
@@ -1004,7 +1019,9 @@ impl Compiler<'_> {
         let mut locals = ArrayVec::new();
 
         let token = match kind {
-            FunctionType::Method => Token::new(TokenType::This, "this", 0),
+            FunctionType::Method | FunctionType::Initializer => {
+                Token::new(TokenType::This, "this", 0)
+            }
             _ => Token::new(TokenType::Error, "", 0),
         };
         locals.push(Local::new(token, 0));

@@ -5,7 +5,6 @@ use std::{
 };
 
 use error::LoxError;
-use memory::Memory;
 
 use crate::vm::Vm;
 
@@ -19,8 +18,7 @@ mod vm;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let memory = Memory::new();
-    let mut vm = Vm::new(memory);
+    let mut vm = Vm::new();
 
     match args.len() {
         1 => repl(&mut vm),
