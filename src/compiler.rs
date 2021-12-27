@@ -242,6 +242,9 @@ impl<'code> Parser<'code> {
         if can_assign && self.matches(TokenType::Equal) {
             self.expression();
             self.emit_op(Op::SetProperty(name));
+        } else if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.emit_op(Op::Invoke(name, arg_count));
         } else {
             self.emit_op(Op::GetProperty(name));
         }

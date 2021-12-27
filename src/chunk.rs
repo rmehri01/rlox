@@ -50,6 +50,7 @@ pub enum Op {
     JumpIfFalse(u16),
     Loop(u16),
     Call(u8),
+    Invoke(u8, u8),
     Closure(u8),
     CloseUpvalue,
     Return,

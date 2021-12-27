@@ -224,6 +224,10 @@ impl Vm {
                 Op::Call(arg_count) => {
                     self.call_value(arg_count as usize)?;
                 }
+                Op::Invoke(index, arg_count) => {
+                    let name = self.current_chunk().read_string(index);
+                    self.invoke(name, arg_count as usize)?;
+                }
                 Op::Closure(index) => {
                     let constant = self.current_chunk().read_constant(index);
 
@@ -598,6 +602,49 @@ impl Vm {
                     .method;
                 self.display_value(Value::Closure(closure_id));
             }
+        }
+    }
+
+    fn invoke(&mut self, name: HeapId, arg_count: usize) -> Result<(), LoxError> {
+        let receiver = self.peek(arg_count);
+        match receiver {
+            Value::Instance(instance_id) => {
+                let instance = self.memory.deref(instance_id).as_instance().unwrap();
+
+                match instance.fields.get(&name) {
+                    Some(field) => {
+                        let location = self.stack.len() - arg_count - 1;
+                        self.stack[location] = *field;
+                        self.call_value(arg_count)
+                    }
+                    None => {
+                        let class = instance.class;
+                        self.invoke_from_class(class, name, arg_count)
+                    }
+                }
+            }
+            _ => Err(self.runtime_error("Only instances have methods.")),
+        }
+    }
+
+    fn invoke_from_class(
+        &mut self,
+        class: HeapId,
+        name_id: HeapId,
+        arg_count: usize,
+    ) -> Result<(), LoxError> {
+        let class = self.memory.deref(class).as_class().unwrap();
+
+        if let Some(&method) = class.methods.get(&name_id) {
+            if let Value::Closure(closure) = method {
+                self.call(closure, arg_count)
+            } else {
+                panic!("Got method that is not closure!")
+            }
+        } else {
+            let name = self.memory.deref(name_id).as_string().unwrap();
+            let message = format!("Undefined property '{}'.", name);
+            Err(self.runtime_error(&message))
         }
     }
 }
