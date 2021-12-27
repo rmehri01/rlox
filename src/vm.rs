@@ -449,6 +449,7 @@ impl Vm {
             Value::NativeFunction(native) => {
                 let left = self.stack.len() - arg_count;
                 let result = native.0(self, &self.stack[left..]);
+                self.stack.truncate(left - 1);
                 self.push(result);
                 Ok(())
             }
