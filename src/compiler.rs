@@ -187,8 +187,15 @@ impl<'code> Parser<'code> {
         let name = self.identifier_constant(self.previous);
 
         self.named_variable(Token::synthetic("this"), false);
-        self.named_variable(Token::synthetic("super"), false);
-        self.emit_op(Op::GetSuper(name));
+
+        if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.named_variable(Token::synthetic("super"), false);
+            self.emit_op(Op::SuperInvoke(name, arg_count));
+        } else {
+            self.named_variable(Token::synthetic("super"), false);
+            self.emit_op(Op::GetSuper(name));
+        }
     }
 
     fn this(&mut self) {

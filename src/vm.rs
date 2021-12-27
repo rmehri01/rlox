@@ -237,6 +237,15 @@ impl Vm {
                     let name = self.current_chunk().read_string(index);
                     self.invoke(name, arg_count as usize)?;
                 }
+                Op::SuperInvoke(index, arg_count) => {
+                    let name = self.current_chunk().read_string(index);
+
+                    if let Value::Class(superclass) = self.pop() {
+                        self.invoke_from_class(superclass, name, arg_count as usize)?;
+                    } else {
+                        panic!("Tried to super invoke on a non-class.");
+                    }
+                }
                 Op::Closure(index) => {
                     let constant = self.current_chunk().read_constant(index);
 
