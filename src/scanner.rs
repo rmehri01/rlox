@@ -111,10 +111,10 @@ impl<'code> Scanner<'code> {
     }
 
     fn peek_next(&self) -> u8 {
-        if self.is_at_end() {
-            b'\0'
-        } else {
+        if self.current + 1 < self.code.len() - 1 {
             self.char_at(self.current + 1)
+        } else {
+            b'\0'
         }
     }
 
