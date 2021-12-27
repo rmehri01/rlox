@@ -53,6 +53,7 @@ pub enum Op {
     CloseUpvalue,
     Return,
     Class(u8),
+    Method(u8),
 }
 
 #[derive(Debug)]

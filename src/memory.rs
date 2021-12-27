@@ -116,6 +116,7 @@ impl Memory {
             }
             ObjData::Class(class) => {
                 self.mark_object(class.name);
+                self.mark_table(&class.methods);
             }
             ObjData::Instance(instance) => {
                 self.mark_object(instance.class);

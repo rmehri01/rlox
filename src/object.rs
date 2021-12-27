@@ -123,11 +123,15 @@ impl PartialEq for NativeFunction {
 #[derive(Debug)]
 pub struct Class {
     pub name: HeapId,
+    pub methods: FxHashMap<HeapId, Value>,
 }
 
 impl Class {
     pub fn new(name: HeapId) -> Self {
-        Self { name }
+        Self {
+            name,
+            methods: FxHashMap::default(),
+        }
     }
 }
 

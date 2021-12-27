@@ -322,6 +322,10 @@ impl Vm {
                     let class_id = self.alloc(ObjData::Class(class));
                     self.stack.push(Value::Class(class_id));
                 }
+                Op::Method(index) => {
+                    let method_name = self.current_chunk().read_string(index);
+                    self.define_method(method_name);
+                }
             }
         }
     }
@@ -450,6 +454,18 @@ impl Vm {
     fn define_native(&mut self, name: &str, native: NativeFunction) {
         let name = self.intern(name);
         self.globals.insert(name, Value::NativeFunction(native));
+    }
+
+    fn define_method(&mut self, name: HeapId) {
+        if let Value::Class(class) = self.peek(1) {
+            let method = self.peek(0);
+            let class = self.memory.deref_mut(class).as_class_mut().unwrap();
+
+            class.methods.insert(name, method);
+            self.pop();
+        } else {
+            panic!("Cannot define a method on a non-class.");
+        }
     }
 
     fn capture_upvalue(&mut self, location: usize) -> HeapId {
