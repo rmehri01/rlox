@@ -225,6 +225,14 @@ impl<'code> Token<'code> {
     pub fn new(kind: TokenType, lexeme: &'code str, line: usize) -> Self {
         Self { kind, lexeme, line }
     }
+
+    pub fn synthetic(lexeme: &'code str) -> Self {
+        Self {
+            kind: TokenType::Synthetic,
+            lexeme,
+            line: 0,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
@@ -277,4 +285,6 @@ pub enum TokenType {
 
     Error,
     Eof,
+
+    Synthetic,
 }

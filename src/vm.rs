@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{mem, time::Instant};
 
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
@@ -190,6 +190,15 @@ impl Vm {
                     let a = self.pop();
                     self.push(Value::Bool(a == b));
                 }
+                Op::GetSuper(index) => {
+                    let name = self.current_chunk().read_string(index);
+
+                    if let Value::Class(superclass) = self.pop() {
+                        self.bind_method(superclass, name)?;
+                    } else {
+                        panic!("Tried to call super on a non-class.");
+                    }
+                }
                 Op::Greater => self.binary_op(|a, b| a > b, Value::Bool)?,
                 Op::Less => self.binary_op(|a, b| a < b, Value::Bool)?,
                 Op::Subtract => self.binary_op(|a, b| a - b, Value::Number)?,
@@ -283,6 +292,32 @@ impl Vm {
                     let class = Class::new(class_name);
                     let class_id = self.alloc(ObjData::Class(class));
                     self.stack.push(Value::Class(class_id));
+                }
+                Op::Inherit => {
+                    let subclass = self.peek(0);
+                    let superclass = self.peek(1);
+
+                    if let (Value::Class(subclass_id), Value::Class(superclass_id)) =
+                        (subclass, superclass)
+                    {
+                        // PERF: maybe clone instead
+                        let superclass =
+                            self.memory.deref_mut(superclass_id).as_class_mut().unwrap();
+                        let methods = mem::take(&mut superclass.methods);
+                        let subclass = self.memory.deref_mut(subclass_id).as_class_mut().unwrap();
+
+                        subclass.methods.extend(methods.iter());
+
+                        self.memory
+                            .deref_mut(superclass_id)
+                            .as_class_mut()
+                            .unwrap()
+                            .methods = methods;
+
+                        self.pop();
+                    } else {
+                        return Err(self.runtime_error("Superclass must be a class."));
+                    }
                 }
                 Op::Method(index) => {
                     let method_name = self.current_chunk().read_string(index);

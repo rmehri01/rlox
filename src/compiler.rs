@@ -81,8 +81,8 @@ impl<'code> Parser<'code> {
             memory,
             compiler: Compiler::new(None, FunctionType::Script),
             current_class: None,
-            current: Token::new(TokenType::Error, "", 0),
-            previous: Token::new(TokenType::Error, "", 0),
+            current: Token::synthetic(""),
+            previous: Token::synthetic(""),
             had_error: false,
             panic_mode: false,
         }
@@ -171,6 +171,24 @@ impl<'code> Parser<'code> {
             .parse()
             .expect("parsed value to be a double");
         self.emit_constant(Value::Number(value))
+    }
+
+    fn super_(&mut self) {
+        if let Some(current_class) = &self.current_class {
+            if !current_class.has_superclass {
+                self.error("Can't use 'super' in a class with no superclass.");
+            }
+        } else {
+            self.error("Can't use 'super' outside of a class.");
+        }
+
+        self.consume(TokenType::Dot, "Expect '.' after 'super'.");
+        self.consume(TokenType::Identifier, "Expect superclass method name.");
+        let name = self.identifier_constant(self.previous);
+
+        self.named_variable(Token::synthetic("this"), false);
+        self.named_variable(Token::synthetic("super"), false);
+        self.emit_op(Op::GetSuper(name));
     }
 
     fn this(&mut self) {
@@ -475,7 +493,7 @@ impl<'code> Parser<'code> {
                 precedence: Precedence::None,
             },
             TokenType::Super => ParseRule {
-                prefix: None,
+                prefix: Some(ParseFn::Normal(Parser::super_)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -509,6 +527,9 @@ impl<'code> Parser<'code> {
                 infix: None,
                 precedence: Precedence::None,
             },
+            TokenType::Synthetic => {
+                panic!("Synthetic token should not be used by the parser table.");
+            }
         }
     }
 
@@ -856,7 +877,25 @@ impl<'code> Parser<'code> {
         self.emit_op(Op::Class(name_constant));
         self.define_variable(name_constant);
 
-        let class_compiler = ClassCompiler::new(self.current_class.take());
+        let mut class_compiler = ClassCompiler::new(self.current_class.take());
+
+        if self.matches(TokenType::Less) {
+            self.consume(TokenType::Identifier, "Expect superclass name.");
+            self.variable(false);
+
+            if class_name.lexeme == self.previous.lexeme {
+                self.error("A class can't inherit from itself.");
+            }
+
+            self.begin_scope();
+            self.add_local(Token::synthetic("super"));
+            self.define_variable(0);
+
+            self.named_variable(class_name, false);
+            self.emit_op(Op::Inherit);
+            class_compiler.has_superclass = true;
+        }
+
         self.current_class = Some(Box::new(class_compiler));
 
         self.named_variable(class_name, false);
@@ -867,7 +906,11 @@ impl<'code> Parser<'code> {
         }
 
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+
         self.emit_op(Op::Pop);
+        if self.current_class.as_ref().unwrap().has_superclass {
+            self.end_scope();
+        }
         if let Some(class_compiler) = self.current_class.take() {
             self.current_class = class_compiler.enclosing;
         }
@@ -1022,10 +1065,8 @@ impl Compiler<'_> {
         let mut locals = ArrayVec::new();
 
         let token = match kind {
-            FunctionType::Method | FunctionType::Initializer => {
-                Token::new(TokenType::This, "this", 0)
-            }
-            _ => Token::new(TokenType::Error, "", 0),
+            FunctionType::Method | FunctionType::Initializer => Token::synthetic("this"),
+            _ => Token::synthetic(""),
         };
         locals.push(Local::new(token, 0));
 
@@ -1127,10 +1168,14 @@ impl<'code> Local<'code> {
 
 struct ClassCompiler {
     pub enclosing: Option<Box<ClassCompiler>>,
+    pub has_superclass: bool,
 }
 
 impl ClassCompiler {
     fn new(enclosing: Option<Box<ClassCompiler>>) -> Self {
-        Self { enclosing }
+        Self {
+            enclosing,
+            has_superclass: false,
+        }
     }
 }

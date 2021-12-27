@@ -37,6 +37,7 @@ pub enum Op {
     GetProperty(u8),
     SetProperty(u8),
     Equal,
+    GetSuper(u8),
     Greater,
     Less,
     Add,
@@ -55,6 +56,7 @@ pub enum Op {
     CloseUpvalue,
     Return,
     Class(u8),
+    Inherit,
     Method(u8),
 }
 
