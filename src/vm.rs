@@ -8,7 +8,7 @@ use crate::{
     compiler::Parser,
     error::LoxError,
     memory::{HeapId, Memory},
-    object::{Class, Closure, Instance, NativeFunction, ObjData, Upvalue},
+    object::{BoundMethod, Class, Closure, Instance, NativeFunction, ObjData, Upvalue},
 };
 
 pub struct Vm {
@@ -154,9 +154,8 @@ impl Vm {
                                 self.push(value);
                             }
                             None => {
-                                let name = self.memory.deref(name_id).as_string().unwrap();
-                                let message = format!("Undefined property '{}'.", name);
-                                return Err(self.runtime_error(&message));
+                                let class = instance.class;
+                                self.bind_method(class, name_id)?;
                             }
                         }
                     } else {
@@ -203,54 +202,8 @@ impl Vm {
                     _ => return Err(self.runtime_error("Operand must be a number.")),
                 },
                 Op::Print => {
-                    // TODO: should use display trait somehow
-                    match self.pop() {
-                        Value::Bool(value) => println!("{}", value),
-                        Value::Nil => println!("nil"),
-                        Value::Number(value) => println!("{}", value),
-                        Value::String(str_id) => {
-                            println!("{}", self.memory.deref(str_id).as_string().unwrap())
-                        }
-                        Value::Function(fun_id) => {
-                            let fn_name = self.memory.deref(fun_id).as_function().unwrap().name;
-                            match fn_name {
-                                Some(str_id) => {
-                                    println!(
-                                        "<fn {}>",
-                                        self.memory.deref(str_id).as_string().unwrap()
-                                    );
-                                }
-                                None => panic!("Expected function name"),
-                            }
-                        }
-                        Value::NativeFunction(_) => println!("<native fn>"),
-                        Value::Closure(closure_id) => {
-                            // TODO: duplicated
-                            let fun_id = self.memory.deref(closure_id).as_closure().unwrap().fun_id;
-                            let fn_name = self.memory.deref(fun_id).as_function().unwrap().name;
-                            match fn_name {
-                                Some(str_id) => {
-                                    println!(
-                                        "<fn {}>",
-                                        self.memory.deref(str_id).as_string().unwrap()
-                                    );
-                                }
-                                None => panic!("Expected function name"),
-                            }
-                        }
-                        Value::Class(class_id) => {
-                            let name_id = self.memory.deref(class_id).as_class().unwrap().name;
-                            let class_name = self.memory.deref(name_id).as_string().unwrap();
-                            println!("{}", class_name);
-                        }
-                        Value::Instance(instance_id) => {
-                            let class_id =
-                                self.memory.deref(instance_id).as_instance().unwrap().class;
-                            let name_id = self.memory.deref(class_id).as_class().unwrap().name;
-                            let class_name = self.memory.deref(name_id).as_string().unwrap();
-                            println!("{} instance", class_name);
-                        }
-                    };
+                    let value = self.pop();
+                    self.display_value(value);
                 }
                 Op::Jump(offset) => {
                     self.current_frame_mut().ip += offset as usize;
@@ -410,6 +363,14 @@ impl Vm {
 
     fn call_value(&mut self, arg_count: usize) -> Result<(), LoxError> {
         match self.peek(arg_count) {
+            Value::BoundMethod(bound_id) => {
+                let bound = self.memory.deref(bound_id).as_bound_method().unwrap();
+                let bound_method = bound.method;
+                let location = self.stack.len() - arg_count - 1;
+
+                self.stack[location] = bound.receiver;
+                self.call(bound_method, arg_count)
+            }
             Value::Class(class_id) => {
                 let instance = Instance::new(class_id);
                 let instance_id = self.alloc(ObjData::Instance(instance));
@@ -547,6 +508,77 @@ impl Vm {
         while let Some(inner) = upvalue {
             self.memory.mark_object(inner);
             upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
+        }
+    }
+
+    fn bind_method(&mut self, class: HeapId, name_id: HeapId) -> Result<(), LoxError> {
+        let class = self.memory.deref(class).as_class().unwrap();
+
+        match class.methods.get(&name_id) {
+            Some(method_val) => {
+                let receiver = self.peek(0);
+
+                if let Value::Closure(method) = method_val {
+                    let bound = BoundMethod::new(receiver, *method);
+                    let bound_id = self.alloc(ObjData::BoundMethod(bound));
+
+                    self.pop();
+                    self.push(Value::BoundMethod(bound_id));
+
+                    Ok(())
+                } else {
+                    panic!("Expected method to be a closure.");
+                }
+            }
+            None => {
+                let name = self.memory.deref(name_id).as_string().unwrap();
+                let message = format!("Undefined property '{}'.", name);
+                Err(self.runtime_error(&message))
+            }
+        }
+    }
+
+    fn display_value(&self, value: Value) {
+        match value {
+            Value::Bool(bool) => println!("{}", bool),
+            Value::Nil => println!("nil"),
+            Value::Number(num) => println!("{}", num),
+            Value::String(str_id) => {
+                println!("{}", self.memory.deref(str_id).as_string().unwrap())
+            }
+            Value::Function(fun_id) => {
+                let fn_name = self.memory.deref(fun_id).as_function().unwrap().name;
+                match fn_name {
+                    Some(str_id) => {
+                        println!("<fn {}>", self.memory.deref(str_id).as_string().unwrap());
+                    }
+                    None => panic!("Expected function name"),
+                }
+            }
+            Value::NativeFunction(_) => println!("<native fn>"),
+            Value::Closure(closure_id) => {
+                let fun_id = self.memory.deref(closure_id).as_closure().unwrap().fun_id;
+                self.display_value(Value::Function(fun_id));
+            }
+            Value::Class(class_id) => {
+                let name_id = self.memory.deref(class_id).as_class().unwrap().name;
+                self.display_value(Value::String(name_id));
+            }
+            Value::Instance(instance_id) => {
+                let class_id = self.memory.deref(instance_id).as_instance().unwrap().class;
+                let name_id = self.memory.deref(class_id).as_class().unwrap().name;
+                let class_name = self.memory.deref(name_id).as_string().unwrap();
+                println!("{} instance", class_name);
+            }
+            Value::BoundMethod(bound_id) => {
+                let closure_id = self
+                    .memory
+                    .deref(bound_id)
+                    .as_bound_method()
+                    .unwrap()
+                    .method;
+                self.display_value(Value::Closure(closure_id));
+            }
         }
     }
 }

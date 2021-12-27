@@ -33,6 +33,7 @@ pub enum ObjData {
     Upvalue(Upvalue),
     Class(Class),
     Instance(Instance),
+    BoundMethod(BoundMethod),
     None,
 }
 
@@ -147,5 +148,17 @@ impl Instance {
             class,
             fields: FxHashMap::default(),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct BoundMethod {
+    pub receiver: Value,
+    pub method: HeapId,
+}
+
+impl BoundMethod {
+    pub fn new(receiver: Value, method: HeapId) -> Self {
+        Self { receiver, method }
     }
 }

@@ -122,6 +122,10 @@ impl Memory {
                 self.mark_object(instance.class);
                 self.mark_table(&instance.fields);
             }
+            ObjData::BoundMethod(bound_method) => {
+                self.mark_value(bound_method.receiver);
+                self.mark_object(bound_method.method);
+            }
             _ => {}
         }
 

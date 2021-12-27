@@ -11,6 +11,7 @@ pub enum Value {
     Closure(HeapId),
     Class(HeapId),
     Instance(HeapId),
+    BoundMethod(HeapId),
 }
 
 impl Value {

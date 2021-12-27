@@ -67,6 +67,7 @@ pub struct Parser<'code> {
     scanner: Scanner<'code>,
     memory: &'code mut Memory,
     compiler: Compiler<'code>,
+    current_class: Option<Box<ClassCompiler>>,
     current: Token<'code>,
     previous: Token<'code>,
     had_error: bool,
@@ -79,6 +80,7 @@ impl<'code> Parser<'code> {
             scanner: Scanner::new(code),
             memory,
             compiler: Compiler::new(None, FunctionType::Script),
+            current_class: None,
             current: Token::new(TokenType::Error, "", 0),
             previous: Token::new(TokenType::Error, "", 0),
             had_error: false,
@@ -169,6 +171,14 @@ impl<'code> Parser<'code> {
             .parse()
             .expect("parsed value to be a double");
         self.emit_constant(Value::Number(value))
+    }
+
+    fn this(&mut self) {
+        if self.current_class.is_none() {
+            self.error("Cannot use 'this' outside of a class.");
+        } else {
+            self.variable(false);
+        }
     }
 
     fn literal(&mut self) {
@@ -467,7 +477,7 @@ impl<'code> Parser<'code> {
                 precedence: Precedence::None,
             },
             TokenType::This => ParseRule {
-                prefix: None,
+                prefix: Some(ParseFn::Normal(Parser::this)),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -842,8 +852,11 @@ impl<'code> Parser<'code> {
         self.declare_variable();
         self.emit_op(Op::Class(name_constant));
         self.define_variable(name_constant);
-        self.named_variable(class_name, false);
 
+        let class_compiler = ClassCompiler::new(self.current_class.take());
+        self.current_class = Some(Box::new(class_compiler));
+
+        self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
 
         while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
@@ -852,13 +865,16 @@ impl<'code> Parser<'code> {
 
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
         self.emit_op(Op::Pop);
+        if let Some(class_compiler) = self.current_class.take() {
+            self.current_class = class_compiler.enclosing;
+        }
     }
 
     fn method(&mut self) {
         self.consume(TokenType::Identifier, "Expect method name.");
 
         let name_constant = self.identifier_constant(self.previous);
-        self.function(FunctionType::Function);
+        self.function(FunctionType::Method);
 
         self.emit_op(Op::Method(name_constant));
     }
@@ -968,6 +984,7 @@ impl<'code> Parser<'code> {
 #[derive(Debug, PartialEq)]
 enum FunctionType {
     Function,
+    Method,
     Script,
 }
 
@@ -985,7 +1002,12 @@ impl Compiler<'_> {
 
     fn new(function_name: Option<HeapId>, kind: FunctionType) -> Self {
         let mut locals = ArrayVec::new();
-        locals.push(Local::new(Token::new(TokenType::Error, "", 0), 0)); // TODO: initializer
+
+        let token = match kind {
+            FunctionType::Method => Token::new(TokenType::This, "this", 0),
+            _ => Token::new(TokenType::Error, "", 0),
+        };
+        locals.push(Local::new(token, 0));
 
         Self {
             enclosing: None,
@@ -1080,5 +1102,15 @@ impl<'code> Local<'code> {
             depth,
             is_captured: false,
         }
+    }
+}
+
+struct ClassCompiler {
+    pub enclosing: Option<Box<ClassCompiler>>,
+}
+
+impl ClassCompiler {
+    fn new(enclosing: Option<Box<ClassCompiler>>) -> Self {
+        Self { enclosing }
     }
 }
