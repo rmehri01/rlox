@@ -10,6 +10,7 @@ pub enum Value {
     NativeFunction(NativeFunction),
     Closure(HeapId),
     Class(HeapId),
+    Instance(HeapId),
 }
 
 impl Value {

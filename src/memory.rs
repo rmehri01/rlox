@@ -117,10 +117,21 @@ impl Memory {
             ObjData::Class(class) => {
                 self.mark_object(class.name);
             }
+            ObjData::Instance(instance) => {
+                self.mark_object(instance.class);
+                self.mark_table(&instance.fields);
+            }
             _ => {}
         }
 
         self.heap[heap_id.0].data = obj_data;
+    }
+
+    pub fn mark_table(&mut self, table: &FxHashMap<HeapId, Value>) {
+        table.iter().for_each(|(object, value)| {
+            self.mark_object(*object);
+            self.mark_value(*value);
+        })
     }
 
     fn remove_white_strings(&mut self) {

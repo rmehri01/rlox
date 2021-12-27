@@ -8,7 +8,7 @@ use crate::{
     compiler::Parser,
     error::LoxError,
     memory::{HeapId, Memory},
-    object::{Class, Closure, NativeFunction, ObjData, Upvalue},
+    object::{Class, Closure, Instance, NativeFunction, ObjData, Upvalue},
 };
 
 pub struct Vm {
@@ -204,6 +204,13 @@ impl Vm {
                             let class_name = self.memory.deref(name_id).as_string().unwrap();
                             println!("{}", class_name);
                         }
+                        Value::Instance(instance_id) => {
+                            let class_id =
+                                self.memory.deref(instance_id).as_instance().unwrap().class;
+                            let name_id = self.memory.deref(class_id).as_class().unwrap().name;
+                            let class_name = self.memory.deref(name_id).as_string().unwrap();
+                            println!("{} instance", class_name);
+                        }
                     };
                 }
                 Op::Jump(offset) => {
@@ -360,6 +367,15 @@ impl Vm {
 
     fn call_value(&mut self, arg_count: usize) -> Result<(), LoxError> {
         match self.peek(arg_count) {
+            Value::Class(class_id) => {
+                let instance = Instance::new(class_id);
+                let instance_id = self.alloc(ObjData::Instance(instance));
+
+                let location = self.stack.len() - arg_count - 1;
+                self.stack[location] = Value::Instance(instance_id);
+
+                Ok(())
+            }
             Value::Closure(closure_id) => self.call(closure_id, arg_count),
             Value::NativeFunction(native) => {
                 let left = self.stack.len() - arg_count;
@@ -466,10 +482,7 @@ impl Vm {
             .iter()
             .for_each(|value| self.memory.mark_value(*value));
 
-        self.globals.iter().for_each(|(object, value)| {
-            self.memory.mark_object(*object);
-            self.memory.mark_value(*value);
-        });
+        self.memory.mark_table(&self.globals);
 
         self.frames.iter().for_each(|frame| {
             self.memory.mark_object(frame.closure_id);

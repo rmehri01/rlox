@@ -2,6 +2,7 @@ use core::fmt;
 use std::ptr;
 
 use enum_as_inner::EnumAsInner;
+use rustc_hash::FxHashMap;
 
 use crate::{
     chunk::{Chunk, Value},
@@ -31,6 +32,7 @@ pub enum ObjData {
     Closure(Closure),
     Upvalue(Upvalue),
     Class(Class),
+    Instance(Instance),
     None,
 }
 
@@ -126,5 +128,20 @@ pub struct Class {
 impl Class {
     pub fn new(name: HeapId) -> Self {
         Self { name }
+    }
+}
+
+#[derive(Debug)]
+pub struct Instance {
+    pub class: HeapId,
+    pub fields: FxHashMap<HeapId, Value>,
+}
+
+impl Instance {
+    pub fn new(class: HeapId) -> Self {
+        Self {
+            class,
+            fields: FxHashMap::default(),
+        }
     }
 }
