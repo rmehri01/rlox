@@ -8,7 +8,6 @@ lto = true
 panic = "abort"
 
 [dependencies]
-typed-arena = "2.0.1"
 rustc-hash = "1.1.0"
 arrayvec = "0.7.2"
 enum-as-inner = "0.3.3"

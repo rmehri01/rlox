@@ -10,7 +10,6 @@ use crate::{
     object::{ObjData, Object},
 };
 
-// TODO: try arena
 pub struct Memory {
     strings: FxHashMap<String, HeapId>,
     heap: Vec<Object>,
