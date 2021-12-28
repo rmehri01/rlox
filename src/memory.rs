@@ -46,14 +46,6 @@ impl Memory {
         }
     }
 
-    pub fn deref(&self, heap_id: HeapId) -> &ObjData {
-        &self.heap[heap_id.0].data
-    }
-
-    pub fn deref_mut(&mut self, heap_id: HeapId) -> &mut ObjData {
-        &mut self.heap[heap_id.0].data
-    }
-
     pub fn intern(&mut self, name: &str) -> HeapId {
         if let Some(&idx) = self.strings.get(name) {
             return idx;
@@ -63,6 +55,14 @@ impl Memory {
         self.strings.insert(name.to_string(), str_id);
 
         str_id
+    }
+
+    pub fn deref(&self, heap_id: HeapId) -> &ObjData {
+        &self.heap[heap_id.0].data
+    }
+
+    pub fn deref_mut(&mut self, heap_id: HeapId) -> &mut ObjData {
+        &mut self.heap[heap_id.0].data
     }
 
     pub fn should_gc(&self) -> bool {

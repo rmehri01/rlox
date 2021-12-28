@@ -51,45 +51,6 @@ impl<'code> Scanner<'code> {
         }
     }
 
-    fn is_at_end(&self) -> bool {
-        self.current == self.code.len()
-    }
-
-    fn make_token(&self, kind: TokenType) -> Token<'code> {
-        Token::new(kind, self.lexeme(), self.line)
-    }
-
-    fn lexeme(&self) -> &'code str {
-        &self.code[self.start..self.current]
-    }
-
-    fn error_token(&self, message: &'static str) -> Token<'static> {
-        Token::new(TokenType::Error, message, self.line)
-    }
-
-    fn advance(&mut self) -> u8 {
-        let char = self.peek();
-        self.current += 1;
-        char
-    }
-
-    fn peek(&self) -> u8 {
-        self.char_at(self.current)
-    }
-
-    fn char_at(&self, index: usize) -> u8 {
-        self.code.as_bytes()[index]
-    }
-
-    fn matches(&mut self, expected: u8) -> bool {
-        if self.is_at_end() || self.peek() != expected {
-            false
-        } else {
-            self.current += 1;
-            true
-        }
-    }
-
     fn skip_whitespace(&mut self) {
         while !self.is_at_end() {
             match self.peek() {
@@ -110,11 +71,12 @@ impl<'code> Scanner<'code> {
         }
     }
 
-    fn peek_next(&self) -> u8 {
-        if self.current + 1 < self.code.len() - 1 {
-            self.char_at(self.current + 1)
+    fn matches(&mut self, expected: u8) -> bool {
+        if self.is_at_end() || self.peek() != expected {
+            false
         } else {
-            b'\0'
+            self.current += 1;
+            true
         }
     }
 
@@ -203,6 +165,44 @@ impl<'code> Scanner<'code> {
         } else {
             None
         }
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.current == self.code.len()
+    }
+
+    fn advance(&mut self) -> u8 {
+        let char = self.peek();
+        self.current += 1;
+        char
+    }
+
+    fn peek(&self) -> u8 {
+        self.char_at(self.current)
+    }
+
+    fn peek_next(&self) -> u8 {
+        if self.current + 1 < self.code.len() - 1 {
+            self.char_at(self.current + 1)
+        } else {
+            b'\0'
+        }
+    }
+
+    fn make_token(&self, kind: TokenType) -> Token<'code> {
+        Token::new(kind, self.lexeme(), self.line)
+    }
+
+    fn lexeme(&self) -> &'code str {
+        &self.code[self.start..self.current]
+    }
+
+    fn char_at(&self, index: usize) -> u8 {
+        self.code.as_bytes()[index]
+    }
+
+    fn error_token(&self, message: &'static str) -> Token<'static> {
+        Token::new(TokenType::Error, message, self.line)
     }
 }
 

@@ -10,59 +10,6 @@ use crate::{
     scanner::{Scanner, Token, TokenType},
 };
 
-#[derive(PartialEq, PartialOrd)]
-enum Precedence {
-    None,
-    Assignment, // =
-    Or,         // or
-    And,        // and
-    Equality,   // == !=
-    Comparison, // < > <= >=
-    Term,       // + -
-    Factor,     // * /
-    Unary,      // ! -
-    Call,       // . ()
-    Primary,
-}
-
-impl Precedence {
-    fn next(&self) -> Self {
-        match self {
-            Self::None => Self::Assignment,
-            Self::Assignment => Self::Or,
-            Self::Or => Self::And,
-            Self::And => Self::Equality,
-            Self::Equality => Self::Comparison,
-            Self::Comparison => Self::Term,
-            Self::Term => Self::Factor,
-            Self::Factor => Self::Unary,
-            Self::Unary => Self::Call,
-            Self::Call => Self::Primary,
-            Self::Primary => Self::None,
-        }
-    }
-}
-
-struct ParseRule<'code> {
-    prefix: Option<ParseFn<'code>>,
-    infix: Option<ParseFn<'code>>,
-    precedence: Precedence,
-}
-
-enum ParseFn<'code> {
-    Normal(fn(&mut Parser<'code>)),
-    Assign(fn(&mut Parser<'code>, bool)),
-}
-
-impl<'code> ParseFn<'code> {
-    fn apply(self, parser: &mut Parser<'code>, can_assign: bool) {
-        match self {
-            ParseFn::Normal(f) => f(parser),
-            ParseFn::Assign(f) => f(parser, can_assign),
-        }
-    }
-}
-
 pub struct Parser<'code> {
     scanner: Scanner<'code>,
     memory: &'code mut Memory,
@@ -104,187 +51,226 @@ impl<'code> Parser<'code> {
         }
     }
 
-    fn emit_ops(&mut self, op1: Op, op2: Op) {
-        let line1 = self.previous.line;
-        self.current_chunk_mut().write(op1, line1);
-
-        let line2 = self.previous.line;
-        self.current_chunk_mut().write(op2, line2);
-    }
-
-    fn emit_op(&mut self, op: Op) {
-        let line = self.previous.line;
-        self.current_chunk_mut().write(op, line);
-    }
-
-    fn advance(&mut self) {
-        self.previous = self.current;
-
-        self.current = self.scanner.scan_token();
-        if self.check(TokenType::Error) {
-            self.error_at_current(self.current.lexeme);
-        }
-    }
-
-    fn error_at_current(&mut self, message: &str) {
-        self.error_at(self.current, message);
-    }
-
-    fn error(&mut self, message: &str) {
-        self.error_at(self.previous, message);
-    }
-
-    fn error_at(&mut self, token: Token, message: &str) {
-        if self.panic_mode {
-            return;
-        }
-
-        self.panic_mode = true;
-        eprint!("[line {}] Error", token.line);
-
-        match token.kind {
-            TokenType::Eof => eprint!(" at end"),
-            TokenType::Error => {}
-            _ => eprint!(" at '{}'", token.lexeme),
-        }
-
-        eprintln!(": {}", message);
-        self.had_error = true;
-    }
-
-    fn consume(&mut self, kind: TokenType, message: &str) {
-        if self.check(kind) {
-            self.advance();
+    fn declaration(&mut self) {
+        if self.matches(TokenType::Class) {
+            self.class_declaration();
+        } else if self.matches(TokenType::Fun) {
+            self.fun_declaration();
+        } else if self.matches(TokenType::Var) {
+            self.var_declaration();
         } else {
-            self.error_at_current(message);
+            self.statement();
         }
+
+        if self.panic_mode {
+            self.synchronize();
+        }
+    }
+
+    fn class_declaration(&mut self) {
+        self.consume(TokenType::Identifier, "Expect class name.");
+        let class_name = self.previous;
+        let name_constant = self.identifier_constant(class_name);
+
+        self.declare_variable();
+        self.emit_op(Op::Class(name_constant));
+        self.define_variable(name_constant);
+
+        let mut class_compiler = ClassCompiler::new(self.current_class.take());
+
+        if self.matches(TokenType::Less) {
+            self.consume(TokenType::Identifier, "Expect superclass name.");
+            self.variable(false);
+
+            if class_name.lexeme == self.previous.lexeme {
+                self.error("A class can't inherit from itself.");
+            }
+
+            self.begin_scope();
+            self.add_local(Token::synthetic("super"));
+            self.define_variable(0);
+
+            self.named_variable(class_name, false);
+            self.emit_op(Op::Inherit);
+            class_compiler.has_superclass = true;
+        }
+
+        self.current_class = Some(Box::new(class_compiler));
+
+        self.named_variable(class_name, false);
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
+
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.method();
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after class body.");
+
+        self.emit_op(Op::Pop);
+        if self.current_class.as_ref().unwrap().has_superclass {
+            self.end_scope();
+        }
+        if let Some(class_compiler) = self.current_class.take() {
+            self.current_class = class_compiler.enclosing;
+        }
+    }
+
+    fn fun_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name.");
+        self.compiler.mark_initialized();
+        self.function(FunctionType::Function);
+        self.define_variable(global);
+    }
+
+    fn var_declaration(&mut self) {
+        let global = self.parse_variable("Expect variable name.");
+
+        if self.matches(TokenType::Equal) {
+            self.expression();
+        } else {
+            self.emit_op(Op::Nil);
+        }
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        );
+
+        self.define_variable(global);
+    }
+
+    fn statement(&mut self) {
+        if self.matches(TokenType::Print) {
+            self.print_statement();
+        } else if self.matches(TokenType::For) {
+            self.for_statement();
+        } else if self.matches(TokenType::If) {
+            self.if_statement();
+        } else if self.matches(TokenType::Return) {
+            self.return_statement();
+        } else if self.matches(TokenType::While) {
+            self.while_statement();
+        } else if self.matches(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
+        } else {
+            self.expression_statement();
+        }
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value.");
+        self.emit_op(Op::Print);
+    }
+
+    fn for_statement(&mut self) {
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
+        if self.matches(TokenType::Semicolon) {
+            // No initializer.
+        } else if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.current_chunk().code.len();
+
+        let mut exit_jump = None;
+        if !self.matches(TokenType::Semicolon) {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.");
+
+            exit_jump = Some(self.emit_jump(Op::JumpIfFalse));
+            self.emit_op(Op::Pop);
+        }
+
+        if !self.matches(TokenType::RightParen) {
+            let body_jump = self.emit_jump(Op::Jump);
+            let increment_start = self.current_chunk().code.len();
+
+            self.expression();
+            self.emit_op(Op::Pop);
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump);
+            self.emit_op(Op::Pop);
+        }
+
+        self.end_scope();
+    }
+
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let then_jump = self.emit_jump(Op::JumpIfFalse);
+        self.emit_op(Op::Pop);
+        self.statement();
+
+        let else_jump = self.emit_jump(Op::Jump);
+        self.patch_jump(then_jump);
+        self.emit_op(Op::Pop);
+
+        if self.matches(TokenType::Else) {
+            self.statement();
+        }
+        self.patch_jump(else_jump);
+    }
+
+    fn return_statement(&mut self) {
+        if self.compiler.function_type == FunctionType::Script {
+            self.error("Can't return from top-level code.");
+        }
+
+        if self.matches(TokenType::Semicolon) {
+            self.emit_return();
+        } else {
+            if self.compiler.function_type == FunctionType::Initializer {
+                self.error("Can't return a value from an initializer.");
+            }
+
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
+            self.emit_op(Op::Return);
+        }
+    }
+
+    fn while_statement(&mut self) {
+        let loop_start = self.current_chunk().code.len();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after condition.");
+
+        let exit_jump = self.emit_jump(Op::JumpIfFalse);
+        self.emit_op(Op::Pop);
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit_op(Op::Pop);
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
+        self.emit_op(Op::Pop);
     }
 
     fn expression(&mut self) {
         self.parse_precedence(&Precedence::Assignment);
-    }
-
-    fn number(&mut self) {
-        let value: f64 = self
-            .previous
-            .lexeme
-            .parse()
-            .expect("parsed value to be a double");
-        self.emit_constant(Value::Number(value));
-    }
-
-    fn super_(&mut self) {
-        if let Some(current_class) = &self.current_class {
-            if !current_class.has_superclass {
-                self.error("Can't use 'super' in a class with no superclass.");
-            }
-        } else {
-            self.error("Can't use 'super' outside of a class.");
-        }
-
-        self.consume(TokenType::Dot, "Expect '.' after 'super'.");
-        self.consume(TokenType::Identifier, "Expect superclass method name.");
-        let name = self.identifier_constant(self.previous);
-
-        self.named_variable(Token::synthetic("this"), false);
-
-        if self.matches(TokenType::LeftParen) {
-            let arg_count = self.argument_list();
-            self.named_variable(Token::synthetic("super"), false);
-            self.emit_op(Op::SuperInvoke(name, arg_count));
-        } else {
-            self.named_variable(Token::synthetic("super"), false);
-            self.emit_op(Op::GetSuper(name));
-        }
-    }
-
-    fn this(&mut self) {
-        if self.current_class.is_none() {
-            self.error("Can't use 'this' outside of a class.");
-        } else {
-            self.variable(false);
-        }
-    }
-
-    fn literal(&mut self) {
-        match self.previous.kind {
-            TokenType::False => self.emit_op(Op::False),
-            TokenType::Nil => self.emit_op(Op::Nil),
-            TokenType::True => self.emit_op(Op::True),
-            _ => panic!("Invalid literal."),
-        }
-    }
-
-    fn string(&mut self) {
-        let lexeme = self.previous.lexeme;
-        let value = &lexeme[1..lexeme.len() - 1];
-        let str_id = self.memory.intern(value);
-
-        self.emit_constant(Value::String(str_id));
-    }
-
-    fn variable(&mut self, can_assign: bool) {
-        self.named_variable(self.previous, can_assign);
-    }
-
-    fn and(&mut self) {
-        let end_jump = self.emit_jump(Op::JumpIfFalse);
-
-        self.emit_op(Op::Pop);
-        self.parse_precedence(&Precedence::And);
-
-        self.patch_jump(end_jump);
-    }
-
-    fn or(&mut self) {
-        let else_jump = self.emit_jump(Op::JumpIfFalse);
-        let end_jump = self.emit_jump(Op::Jump);
-
-        self.patch_jump(else_jump);
-        self.emit_op(Op::Pop);
-
-        self.parse_precedence(&Precedence::Or);
-        self.patch_jump(end_jump);
-    }
-
-    fn make_constant(&mut self, value: Value) -> u8 {
-        let constant = self.current_chunk_mut().add_constant(value);
-        u8::try_from(constant).unwrap_or_else(|_| {
-            self.error("Too many constants in one chunk.");
-            0
-        })
-    }
-
-    fn grouping(&mut self) {
-        self.expression();
-        self.consume(TokenType::RightParen, "Expect ')' after expression.");
-    }
-
-    fn dot(&mut self, can_assign: bool) {
-        self.consume(TokenType::Identifier, "Expect property name after '.'.");
-        let name = self.identifier_constant(self.previous);
-
-        if can_assign && self.matches(TokenType::Equal) {
-            self.expression();
-            self.emit_op(Op::SetProperty(name));
-        } else if self.matches(TokenType::LeftParen) {
-            let arg_count = self.argument_list();
-            self.emit_op(Op::Invoke(name, arg_count));
-        } else {
-            self.emit_op(Op::GetProperty(name));
-        }
-    }
-
-    fn unary(&mut self) {
-        let operator_kind = self.previous.kind;
-
-        self.parse_precedence(&Precedence::Unary);
-
-        match operator_kind {
-            TokenType::Bang => self.emit_op(Op::Not),
-            TokenType::Minus => self.emit_op(Op::Negate),
-            _ => panic!("Invalid unary operator."),
-        };
     }
 
     fn parse_precedence(&mut self, precedence: &Precedence) {
@@ -309,27 +295,6 @@ impl<'code> Parser<'code> {
         if can_assign && self.matches(TokenType::Equal) {
             self.error("Invalid assignment target.");
         }
-    }
-
-    fn binary(&mut self) {
-        let operator_kind = self.previous.kind;
-        let rule = Parser::get_rule(operator_kind);
-
-        self.parse_precedence(&rule.precedence.next());
-
-        match operator_kind {
-            TokenType::BangEqual => self.emit_ops(Op::Equal, Op::Not),
-            TokenType::EqualEqual => self.emit_op(Op::Equal),
-            TokenType::Greater => self.emit_op(Op::Greater),
-            TokenType::GreaterEqual => self.emit_ops(Op::Less, Op::Not),
-            TokenType::Less => self.emit_op(Op::Less),
-            TokenType::LessEqual => self.emit_ops(Op::Greater, Op::Not),
-            TokenType::Plus => self.emit_op(Op::Add),
-            TokenType::Minus => self.emit_op(Op::Subtract),
-            TokenType::Star => self.emit_op(Op::Multiply),
-            TokenType::Slash => self.emit_op(Op::Divide),
-            _ => panic!("Invalid binary operator."),
-        };
     }
 
     fn get_rule(kind: TokenType) -> ParseRule<'code> {
@@ -540,117 +505,164 @@ impl<'code> Parser<'code> {
         }
     }
 
-    fn emit_constant(&mut self, value: Value) {
-        let index = self.make_constant(value);
-        self.emit_op(Op::Constant(index));
-    }
-
-    fn declaration(&mut self) {
-        if self.matches(TokenType::Class) {
-            self.class_declaration();
-        } else if self.matches(TokenType::Fun) {
-            self.fun_declaration();
-        } else if self.matches(TokenType::Var) {
-            self.var_declaration();
-        } else {
-            self.statement();
-        }
-
-        if self.panic_mode {
-            self.synchronize();
-        }
-    }
-
-    fn statement(&mut self) {
-        if self.matches(TokenType::Print) {
-            self.print_statement();
-        } else if self.matches(TokenType::For) {
-            self.for_statement();
-        } else if self.matches(TokenType::If) {
-            self.if_statement();
-        } else if self.matches(TokenType::Return) {
-            self.return_statement();
-        } else if self.matches(TokenType::While) {
-            self.while_statement();
-        } else if self.matches(TokenType::LeftBrace) {
-            self.begin_scope();
-            self.block();
-            self.end_scope();
-        } else {
-            self.expression_statement();
-        }
-    }
-
-    fn print_statement(&mut self) {
+    fn grouping(&mut self) {
         self.expression();
-        self.consume(TokenType::Semicolon, "Expect ';' after value.");
-        self.emit_op(Op::Print);
+        self.consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
-    fn matches(&mut self, kind: TokenType) -> bool {
-        if self.check(kind) {
-            self.advance();
-            true
-        } else {
-            false
-        }
+    fn call(&mut self) {
+        let arg_count = self.argument_list();
+        self.emit_op(Op::Call(arg_count));
     }
 
-    fn expression_statement(&mut self) {
-        self.expression();
-        self.consume(TokenType::Semicolon, "Expect ';' after expression.");
-        self.emit_op(Op::Pop);
-    }
+    fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::Identifier, "Expect property name after '.'.");
+        let name = self.identifier_constant(self.previous);
 
-    fn synchronize(&mut self) {
-        self.panic_mode = false;
-
-        while self.previous.kind != TokenType::Eof {
-            if self.previous.kind == TokenType::Semicolon {
-                return;
-            }
-
-            match self.current.kind {
-                TokenType::Class
-                | TokenType::Fun
-                | TokenType::Var
-                | TokenType::For
-                | TokenType::If
-                | TokenType::While
-                | TokenType::Print
-                | TokenType::Return => return,
-                _ => (),
-            };
-
-            self.advance();
-        }
-    }
-
-    fn var_declaration(&mut self) {
-        let global = self.parse_variable("Expect variable name.");
-
-        if self.matches(TokenType::Equal) {
+        if can_assign && self.matches(TokenType::Equal) {
             self.expression();
+            self.emit_op(Op::SetProperty(name));
+        } else if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.emit_op(Op::Invoke(name, arg_count));
         } else {
-            self.emit_op(Op::Nil);
+            self.emit_op(Op::GetProperty(name));
         }
-        self.consume(
-            TokenType::Semicolon,
-            "Expect ';' after variable declaration.",
-        );
-
-        self.define_variable(global);
     }
 
-    fn parse_variable(&mut self, error_message: &str) -> u8 {
-        self.consume(TokenType::Identifier, error_message);
+    fn unary(&mut self) {
+        let operator_kind = self.previous.kind;
 
-        self.declare_variable();
-        if self.compiler.scope_depth > 0 {
-            0
-        } else {
-            self.identifier_constant(self.previous)
+        self.parse_precedence(&Precedence::Unary);
+
+        match operator_kind {
+            TokenType::Bang => self.emit_op(Op::Not),
+            TokenType::Minus => self.emit_op(Op::Negate),
+            _ => panic!("Invalid unary operator."),
+        };
+    }
+
+    fn binary(&mut self) {
+        let operator_kind = self.previous.kind;
+        let rule = Parser::get_rule(operator_kind);
+
+        self.parse_precedence(&rule.precedence.next());
+
+        match operator_kind {
+            TokenType::BangEqual => self.emit_ops(Op::Equal, Op::Not),
+            TokenType::EqualEqual => self.emit_op(Op::Equal),
+            TokenType::Greater => self.emit_op(Op::Greater),
+            TokenType::GreaterEqual => self.emit_ops(Op::Less, Op::Not),
+            TokenType::Less => self.emit_op(Op::Less),
+            TokenType::LessEqual => self.emit_ops(Op::Greater, Op::Not),
+            TokenType::Plus => self.emit_op(Op::Add),
+            TokenType::Minus => self.emit_op(Op::Subtract),
+            TokenType::Star => self.emit_op(Op::Multiply),
+            TokenType::Slash => self.emit_op(Op::Divide),
+            _ => panic!("Invalid binary operator."),
+        };
+    }
+
+    fn string(&mut self) {
+        let lexeme = self.previous.lexeme;
+        let value = &lexeme[1..lexeme.len() - 1];
+        let str_id = self.memory.intern(value);
+
+        self.emit_constant(Value::String(str_id));
+    }
+
+    fn number(&mut self) {
+        let value: f64 = self
+            .previous
+            .lexeme
+            .parse()
+            .expect("parsed value to be a double");
+        self.emit_constant(Value::Number(value));
+    }
+
+    fn and(&mut self) {
+        let end_jump = self.emit_jump(Op::JumpIfFalse);
+
+        self.emit_op(Op::Pop);
+        self.parse_precedence(&Precedence::And);
+
+        self.patch_jump(end_jump);
+    }
+
+    fn or(&mut self) {
+        let else_jump = self.emit_jump(Op::JumpIfFalse);
+        let end_jump = self.emit_jump(Op::Jump);
+
+        self.patch_jump(else_jump);
+        self.emit_op(Op::Pop);
+
+        self.parse_precedence(&Precedence::Or);
+        self.patch_jump(end_jump);
+    }
+
+    fn literal(&mut self) {
+        match self.previous.kind {
+            TokenType::False => self.emit_op(Op::False),
+            TokenType::Nil => self.emit_op(Op::Nil),
+            TokenType::True => self.emit_op(Op::True),
+            _ => panic!("Invalid literal."),
         }
+    }
+
+    fn super_(&mut self) {
+        if let Some(current_class) = &self.current_class {
+            if !current_class.has_superclass {
+                self.error("Can't use 'super' in a class with no superclass.");
+            }
+        } else {
+            self.error("Can't use 'super' outside of a class.");
+        }
+
+        self.consume(TokenType::Dot, "Expect '.' after 'super'.");
+        self.consume(TokenType::Identifier, "Expect superclass method name.");
+        let name = self.identifier_constant(self.previous);
+
+        self.named_variable(Token::synthetic("this"), false);
+
+        if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.named_variable(Token::synthetic("super"), false);
+            self.emit_op(Op::SuperInvoke(name, arg_count));
+        } else {
+            self.named_variable(Token::synthetic("super"), false);
+            self.emit_op(Op::GetSuper(name));
+        }
+    }
+
+    fn this(&mut self) {
+        if self.current_class.is_none() {
+            self.error("Can't use 'this' outside of a class.");
+        } else {
+            self.variable(false);
+        }
+    }
+
+    fn argument_list(&mut self) -> u8 {
+        let mut arg_count = 0;
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.expression();
+
+                if arg_count == 255 {
+                    self.error("Can't have more than 255 arguments.");
+                }
+
+                arg_count += 1;
+
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
     }
 
     fn identifier_constant(&mut self, token: Token) -> u8 {
@@ -658,13 +670,82 @@ impl<'code> Parser<'code> {
         self.make_constant(Value::String(identifier))
     }
 
-    fn define_variable(&mut self, index: u8) {
-        if self.compiler.scope_depth > 0 {
-            self.compiler.mark_initialized();
+    fn make_constant(&mut self, value: Value) -> u8 {
+        let constant = self.current_chunk_mut().add_constant(value);
+        u8::try_from(constant).unwrap_or_else(|_| {
+            self.error("Too many constants in one chunk.");
+            0
+        })
+    }
+
+    fn declare_variable(&mut self) {
+        if self.compiler.scope_depth == 0 {
             return;
         }
 
-        self.emit_op(Op::DefineGlobal(index));
+        let prev = self.previous;
+
+        if self.compiler.is_local_declared(prev) {
+            self.error("Already a variable with this name in this scope.");
+        } else {
+            self.add_local(prev);
+        }
+    }
+
+    fn add_local(&mut self, token: Token<'code>) {
+        if self.compiler.locals.len() == Compiler::MAX_LOCALS {
+            self.error("Too many local variables in function.");
+        } else {
+            let local = Local::new(token, None);
+            self.compiler.locals.push(local);
+        }
+    }
+
+    fn emit_op(&mut self, op: Op) {
+        let line = self.previous.line;
+        self.current_chunk_mut().write(op, line);
+    }
+
+    fn emit_ops(&mut self, op1: Op, op2: Op) {
+        let line1 = self.previous.line;
+        self.current_chunk_mut().write(op1, line1);
+
+        let line2 = self.previous.line;
+        self.current_chunk_mut().write(op2, line2);
+    }
+
+    fn emit_constant(&mut self, value: Value) {
+        let index = self.make_constant(value);
+        self.emit_op(Op::Constant(index));
+    }
+
+    fn emit_jump(&mut self, make_jump: fn(u16) -> Op) -> usize {
+        self.emit_op(make_jump(0xffff));
+        self.current_chunk().last_index()
+    }
+
+    fn emit_loop(&mut self, loop_start: usize) {
+        let offset = self.current_chunk().code.len() - loop_start + 1;
+
+        if let Ok(offset) = u16::try_from(offset) {
+            self.emit_op(Op::Loop(offset));
+        } else {
+            self.error("Loop body too large.");
+        }
+    }
+
+    fn emit_return(&mut self) {
+        if self.compiler.function_type == FunctionType::Initializer {
+            self.emit_op(Op::GetLocal(0));
+        } else {
+            self.emit_op(Op::Nil);
+        }
+
+        self.emit_op(Op::Return);
+    }
+
+    fn variable(&mut self, can_assign: bool) {
+        self.named_variable(self.previous, can_assign);
     }
 
     fn named_variable(&mut self, name: Token, can_assign: bool) {
@@ -701,249 +782,6 @@ impl<'code> Parser<'code> {
         }
     }
 
-    fn block(&mut self) {
-        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
-            self.declaration();
-        }
-
-        self.consume(TokenType::RightBrace, "Expect '}' after block.");
-    }
-
-    fn check(&self, kind: TokenType) -> bool {
-        self.current.kind == kind
-    }
-
-    fn begin_scope(&mut self) {
-        self.compiler.scope_depth += 1;
-    }
-
-    fn end_scope(&mut self) {
-        self.compiler.scope_depth -= 1;
-
-        while let Some(local) = self
-            .compiler
-            .locals
-            .last()
-            .filter(|local| local.depth > Some(self.compiler.scope_depth))
-        {
-            if local.is_captured {
-                self.emit_op(Op::CloseUpvalue);
-            } else {
-                self.emit_op(Op::Pop);
-            }
-            self.compiler.locals.pop();
-        }
-    }
-
-    fn declare_variable(&mut self) {
-        if self.compiler.scope_depth == 0 {
-            return;
-        }
-
-        let prev = self.previous;
-
-        if self.compiler.is_local_declared(prev) {
-            self.error("Already a variable with this name in this scope.");
-        } else {
-            self.add_local(prev);
-        }
-    }
-
-    fn add_local(&mut self, token: Token<'code>) {
-        if self.compiler.locals.len() == Compiler::MAX_LOCALS {
-            self.error("Too many local variables in function.");
-        } else {
-            let local = Local::new(token, None);
-            self.compiler.locals.push(local);
-        }
-    }
-
-    fn if_statement(&mut self) {
-        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.");
-        self.expression();
-        self.consume(TokenType::RightParen, "Expect ')' after condition.");
-
-        let then_jump = self.emit_jump(Op::JumpIfFalse);
-        self.emit_op(Op::Pop);
-        self.statement();
-
-        let else_jump = self.emit_jump(Op::Jump);
-        self.patch_jump(then_jump);
-        self.emit_op(Op::Pop);
-
-        if self.matches(TokenType::Else) {
-            self.statement();
-        }
-        self.patch_jump(else_jump);
-    }
-
-    fn patch_jump(&mut self, offset: usize) {
-        let jump = self.current_chunk().last_index() - offset;
-
-        if let Ok(jump) = u16::try_from(jump) {
-            match self.current_chunk_mut().code[offset] {
-                Op::JumpIfFalse(ref mut o) | Op::Jump(ref mut o) => *o = jump,
-                _ => panic!("Attempting to patch non-jump op"),
-            }
-        } else {
-            self.error("Too much code to jump over.");
-        }
-    }
-
-    fn emit_jump(&mut self, make_jump: fn(u16) -> Op) -> usize {
-        self.emit_op(make_jump(0xffff));
-        self.current_chunk().last_index()
-    }
-
-    fn while_statement(&mut self) {
-        let loop_start = self.current_chunk().code.len();
-        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.");
-        self.expression();
-        self.consume(TokenType::RightParen, "Expect ')' after condition.");
-
-        let exit_jump = self.emit_jump(Op::JumpIfFalse);
-        self.emit_op(Op::Pop);
-        self.statement();
-        self.emit_loop(loop_start);
-
-        self.patch_jump(exit_jump);
-        self.emit_op(Op::Pop);
-    }
-
-    fn emit_loop(&mut self, loop_start: usize) {
-        let offset = self.current_chunk().code.len() - loop_start + 1;
-
-        if let Ok(offset) = u16::try_from(offset) {
-            self.emit_op(Op::Loop(offset));
-        } else {
-            self.error("Loop body too large.");
-        }
-    }
-
-    fn for_statement(&mut self) {
-        self.begin_scope();
-
-        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.");
-        if self.matches(TokenType::Semicolon) {
-            // No initializer.
-        } else if self.matches(TokenType::Var) {
-            self.var_declaration();
-        } else {
-            self.expression_statement();
-        }
-
-        let mut loop_start = self.current_chunk().code.len();
-
-        let mut exit_jump = None;
-        if !self.matches(TokenType::Semicolon) {
-            self.expression();
-            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.");
-
-            exit_jump = Some(self.emit_jump(Op::JumpIfFalse));
-            self.emit_op(Op::Pop);
-        }
-
-        if !self.matches(TokenType::RightParen) {
-            let body_jump = self.emit_jump(Op::Jump);
-            let increment_start = self.current_chunk().code.len();
-
-            self.expression();
-            self.emit_op(Op::Pop);
-            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
-
-            self.emit_loop(loop_start);
-            loop_start = increment_start;
-            self.patch_jump(body_jump);
-        }
-
-        self.statement();
-        self.emit_loop(loop_start);
-
-        if let Some(exit_jump) = exit_jump {
-            self.patch_jump(exit_jump);
-            self.emit_op(Op::Pop);
-        }
-
-        self.end_scope();
-    }
-
-    fn current_chunk(&self) -> &Chunk {
-        &self.compiler.function.chunk
-    }
-
-    fn current_chunk_mut(&mut self) -> &mut Chunk {
-        &mut self.compiler.function.chunk
-    }
-
-    fn class_declaration(&mut self) {
-        self.consume(TokenType::Identifier, "Expect class name.");
-        let class_name = self.previous;
-        let name_constant = self.identifier_constant(class_name);
-
-        self.declare_variable();
-        self.emit_op(Op::Class(name_constant));
-        self.define_variable(name_constant);
-
-        let mut class_compiler = ClassCompiler::new(self.current_class.take());
-
-        if self.matches(TokenType::Less) {
-            self.consume(TokenType::Identifier, "Expect superclass name.");
-            self.variable(false);
-
-            if class_name.lexeme == self.previous.lexeme {
-                self.error("A class can't inherit from itself.");
-            }
-
-            self.begin_scope();
-            self.add_local(Token::synthetic("super"));
-            self.define_variable(0);
-
-            self.named_variable(class_name, false);
-            self.emit_op(Op::Inherit);
-            class_compiler.has_superclass = true;
-        }
-
-        self.current_class = Some(Box::new(class_compiler));
-
-        self.named_variable(class_name, false);
-        self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
-
-        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
-            self.method();
-        }
-
-        self.consume(TokenType::RightBrace, "Expect '}' after class body.");
-
-        self.emit_op(Op::Pop);
-        if self.current_class.as_ref().unwrap().has_superclass {
-            self.end_scope();
-        }
-        if let Some(class_compiler) = self.current_class.take() {
-            self.current_class = class_compiler.enclosing;
-        }
-    }
-
-    fn method(&mut self) {
-        self.consume(TokenType::Identifier, "Expect method name.");
-
-        let name_constant = self.identifier_constant(self.previous);
-        let function_type = if self.previous.lexeme == "init" {
-            FunctionType::Initializer
-        } else {
-            FunctionType::Method
-        };
-
-        self.function(function_type);
-        self.emit_op(Op::Method(name_constant));
-    }
-
-    fn fun_declaration(&mut self) {
-        let global = self.parse_variable("Expect function name.");
-        self.compiler.mark_initialized();
-        self.function(FunctionType::Function);
-        self.define_variable(global);
-    }
-
     fn function(&mut self, kind: FunctionType) {
         self.push_compiler(kind);
 
@@ -976,6 +814,121 @@ impl<'code> Parser<'code> {
         self.emit_op(Op::Closure(index));
     }
 
+    fn method(&mut self) {
+        self.consume(TokenType::Identifier, "Expect method name.");
+
+        let name_constant = self.identifier_constant(self.previous);
+        let function_type = if self.previous.lexeme == "init" {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
+
+        self.function(function_type);
+        self.emit_op(Op::Method(name_constant));
+    }
+
+    fn begin_scope(&mut self) {
+        self.compiler.scope_depth += 1;
+    }
+
+    fn block(&mut self) {
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.declaration();
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
+    }
+
+    fn end_scope(&mut self) {
+        self.compiler.scope_depth -= 1;
+
+        while let Some(local) = self
+            .compiler
+            .locals
+            .last()
+            .filter(|local| local.depth > Some(self.compiler.scope_depth))
+        {
+            if local.is_captured {
+                self.emit_op(Op::CloseUpvalue);
+            } else {
+                self.emit_op(Op::Pop);
+            }
+            self.compiler.locals.pop();
+        }
+    }
+
+    fn patch_jump(&mut self, offset: usize) {
+        let jump = self.current_chunk().last_index() - offset;
+
+        if let Ok(jump) = u16::try_from(jump) {
+            match self.current_chunk_mut().code[offset] {
+                Op::JumpIfFalse(ref mut o) | Op::Jump(ref mut o) => *o = jump,
+                _ => panic!("Attempting to patch non-jump op"),
+            }
+        } else {
+            self.error("Too much code to jump over.");
+        }
+    }
+
+    fn consume(&mut self, kind: TokenType, message: &str) {
+        if self.check(kind) {
+            self.advance();
+        } else {
+            self.error_at_current(message);
+        }
+    }
+
+    fn matches(&mut self, kind: TokenType) -> bool {
+        if self.check(kind) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn check(&self, kind: TokenType) -> bool {
+        self.current.kind == kind
+    }
+
+    fn advance(&mut self) {
+        self.previous = self.current;
+
+        self.current = self.scanner.scan_token();
+        if self.check(TokenType::Error) {
+            self.error_at_current(self.current.lexeme);
+        }
+    }
+
+    fn parse_variable(&mut self, error_message: &str) -> u8 {
+        self.consume(TokenType::Identifier, error_message);
+
+        self.declare_variable();
+        if self.compiler.scope_depth > 0 {
+            0
+        } else {
+            self.identifier_constant(self.previous)
+        }
+    }
+
+    fn define_variable(&mut self, index: u8) {
+        if self.compiler.scope_depth > 0 {
+            self.compiler.mark_initialized();
+            return;
+        }
+
+        self.emit_op(Op::DefineGlobal(index));
+    }
+
+    fn current_chunk(&self) -> &Chunk {
+        &self.compiler.function.chunk
+    }
+
+    fn current_chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.compiler.function.chunk
+    }
+
     fn push_compiler(&mut self, kind: FunctionType) {
         let function_name = self.memory.intern(self.previous.lexeme);
         let inner = Compiler::new(Some(function_name), kind);
@@ -991,59 +944,86 @@ impl<'code> Parser<'code> {
         inner.function
     }
 
-    fn call(&mut self) {
-        let arg_count = self.argument_list();
-        self.emit_op(Op::Call(arg_count));
+    fn error_at_current(&mut self, message: &str) {
+        self.error_at(self.current, message);
     }
 
-    fn argument_list(&mut self) -> u8 {
-        let mut arg_count = 0;
-
-        if !self.check(TokenType::RightParen) {
-            loop {
-                self.expression();
-
-                if arg_count == 255 {
-                    self.error("Can't have more than 255 arguments.");
-                }
-
-                arg_count += 1;
-
-                if !self.matches(TokenType::Comma) {
-                    break;
-                }
-            }
-        }
-
-        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
-        arg_count
+    fn error(&mut self, message: &str) {
+        self.error_at(self.previous, message);
     }
 
-    fn emit_return(&mut self) {
-        if self.compiler.function_type == FunctionType::Initializer {
-            self.emit_op(Op::GetLocal(0));
-        } else {
-            self.emit_op(Op::Nil);
+    fn error_at(&mut self, token: Token, message: &str) {
+        if self.panic_mode {
+            return;
         }
 
-        self.emit_op(Op::Return);
+        self.panic_mode = true;
+        eprint!("[line {}] Error", token.line);
+
+        match token.kind {
+            TokenType::Eof => eprint!(" at end"),
+            TokenType::Error => {}
+            _ => eprint!(" at '{}'", token.lexeme),
+        }
+
+        eprintln!(": {}", message);
+        self.had_error = true;
     }
 
-    fn return_statement(&mut self) {
-        if self.compiler.function_type == FunctionType::Script {
-            self.error("Can't return from top-level code.");
-        }
+    fn synchronize(&mut self) {
+        self.panic_mode = false;
 
-        if self.matches(TokenType::Semicolon) {
-            self.emit_return();
-        } else {
-            if self.compiler.function_type == FunctionType::Initializer {
-                self.error("Can't return a value from an initializer.");
+        while self.previous.kind != TokenType::Eof {
+            if self.previous.kind == TokenType::Semicolon {
+                return;
             }
 
-            self.expression();
-            self.consume(TokenType::Semicolon, "Expect ';' after return value.");
-            self.emit_op(Op::Return);
+            match self.current.kind {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return,
+                _ => (),
+            };
+
+            self.advance();
+        }
+    }
+}
+
+#[derive(PartialEq, PartialOrd)]
+enum Precedence {
+    None,
+    Assignment, // =
+    Or,         // or
+    And,        // and
+    Equality,   // == !=
+    Comparison, // < > <= >=
+    Term,       // + -
+    Factor,     // * /
+    Unary,      // ! -
+    Call,       // . ()
+    Primary,
+}
+
+impl Precedence {
+    fn next(&self) -> Self {
+        match self {
+            Self::None => Self::Assignment,
+            Self::Assignment => Self::Or,
+            Self::Or => Self::And,
+            Self::And => Self::Equality,
+            Self::Equality => Self::Comparison,
+            Self::Comparison => Self::Term,
+            Self::Term => Self::Factor,
+            Self::Factor => Self::Unary,
+            Self::Unary => Self::Call,
+            Self::Call => Self::Primary,
+            Self::Primary => Self::None,
         }
     }
 }
@@ -1054,6 +1034,37 @@ enum FunctionType {
     Initializer,
     Method,
     Script,
+}
+
+#[derive(Debug)]
+struct Local<'code> {
+    name: Token<'code>,
+    depth: Option<u32>,
+    is_captured: bool,
+}
+
+impl<'code> Local<'code> {
+    fn new(name: Token<'code>, depth: Option<u32>) -> Self {
+        Self {
+            name,
+            depth,
+            is_captured: false,
+        }
+    }
+}
+
+struct ClassCompiler {
+    pub enclosing: Option<Box<ClassCompiler>>,
+    pub has_superclass: bool,
+}
+
+impl ClassCompiler {
+    fn new(enclosing: Option<Box<Self>>) -> Self {
+        Self {
+            enclosing,
+            has_superclass: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1162,33 +1173,22 @@ impl Compiler<'_> {
     }
 }
 
-#[derive(Debug)]
-struct Local<'code> {
-    name: Token<'code>,
-    depth: Option<u32>,
-    is_captured: bool,
+struct ParseRule<'code> {
+    prefix: Option<ParseFn<'code>>,
+    infix: Option<ParseFn<'code>>,
+    precedence: Precedence,
 }
 
-impl<'code> Local<'code> {
-    fn new(name: Token<'code>, depth: Option<u32>) -> Self {
-        Self {
-            name,
-            depth,
-            is_captured: false,
-        }
-    }
+enum ParseFn<'code> {
+    Normal(fn(&mut Parser<'code>)),
+    Assign(fn(&mut Parser<'code>, bool)),
 }
 
-struct ClassCompiler {
-    pub enclosing: Option<Box<ClassCompiler>>,
-    pub has_superclass: bool,
-}
-
-impl ClassCompiler {
-    fn new(enclosing: Option<Box<Self>>) -> Self {
-        Self {
-            enclosing,
-            has_superclass: false,
+impl<'code> ParseFn<'code> {
+    fn apply(self, parser: &mut Parser<'code>, can_assign: bool) {
+        match self {
+            ParseFn::Normal(f) => f(parser),
+            ParseFn::Assign(f) => f(parser, can_assign),
         }
     }
 }

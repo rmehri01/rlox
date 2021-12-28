@@ -1,66 +1,5 @@
 use crate::{memory::HeapId, object::NativeFunction};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Value {
-    Bool(bool),
-    Nil,
-    Number(f64),
-    String(HeapId),
-    Function(HeapId),
-    NativeFunction(NativeFunction),
-    Closure(HeapId),
-    Class(HeapId),
-    Instance(HeapId),
-    BoundMethod(HeapId),
-}
-
-impl Value {
-    pub fn is_falsey(&self) -> bool {
-        matches!(self, Value::Bool(false) | Value::Nil)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Op {
-    Constant(u8),
-    Nil,
-    True,
-    False,
-    Pop,
-    GetLocal(u8),
-    SetLocal(u8),
-    GetGlobal(u8),
-    DefineGlobal(u8),
-    SetGlobal(u8),
-    GetUpvalue(u8),
-    SetUpvalue(u8),
-    GetProperty(u8),
-    SetProperty(u8),
-    Equal,
-    GetSuper(u8),
-    Greater,
-    Less,
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Not,
-    Negate,
-    Print,
-    Jump(u16),
-    JumpIfFalse(u16),
-    Loop(u16),
-    Call(u8),
-    Invoke(u8, u8),
-    SuperInvoke(u8, u8),
-    Closure(u8),
-    CloseUpvalue,
-    Return,
-    Class(u8),
-    Inherit,
-    Method(u8),
-}
-
 #[derive(Debug)]
 pub struct Chunk {
     pub code: Vec<Op>,
@@ -126,6 +65,67 @@ impl Chunk {
 
     pub fn last_index(&self) -> usize {
         self.code.len() - 1
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Op {
+    Constant(u8),
+    Nil,
+    True,
+    False,
+    Pop,
+    GetLocal(u8),
+    SetLocal(u8),
+    GetGlobal(u8),
+    DefineGlobal(u8),
+    SetGlobal(u8),
+    GetUpvalue(u8),
+    SetUpvalue(u8),
+    GetProperty(u8),
+    SetProperty(u8),
+    Equal,
+    GetSuper(u8),
+    Greater,
+    Less,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Not,
+    Negate,
+    Print,
+    Jump(u16),
+    JumpIfFalse(u16),
+    Loop(u16),
+    Call(u8),
+    Invoke(u8, u8),
+    SuperInvoke(u8, u8),
+    Closure(u8),
+    CloseUpvalue,
+    Return,
+    Class(u8),
+    Inherit,
+    Method(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Value {
+    Bool(bool),
+    Nil,
+    Number(f64),
+    String(HeapId),
+    Function(HeapId),
+    NativeFunction(NativeFunction),
+    Closure(HeapId),
+    Class(HeapId),
+    Instance(HeapId),
+    BoundMethod(HeapId),
+}
+
+impl Value {
+    pub fn is_falsey(&self) -> bool {
+        matches!(self, Value::Bool(false) | Value::Nil)
     }
 }
 
