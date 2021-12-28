@@ -43,12 +43,6 @@ pub struct Closure {
     pub upvalues: Vec<HeapId>,
 }
 
-impl PartialEq for Closure {
-    fn eq(&self, other: &Self) -> bool {
-        self.fun_id == other.fun_id
-    }
-}
-
 impl Closure {
     pub fn new(fun_id: HeapId) -> Self {
         Self {
