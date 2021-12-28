@@ -6,7 +6,7 @@ use crate::{
     chunk::{Chunk, Op, Value},
     error::LoxError,
     memory::{HeapId, Memory},
-    object::{FnUpvalue, Function, ObjData},
+    object::{Function, FunctionUpvalue, ObjData},
     scanner::{Scanner, Token, TokenType},
 };
 
@@ -130,8 +130,8 @@ impl<'code> Parser<'code> {
         self.error_at(self.current, message);
     }
 
-    fn error(&mut self, msg: &str) {
-        self.error_at(self.previous, msg);
+    fn error(&mut self, message: &str) {
+        self.error_at(self.previous, message);
     }
 
     fn error_at(&mut self, token: Token, message: &str) {
@@ -672,16 +672,16 @@ impl<'code> Parser<'code> {
         let set_op;
 
         if let Some(res) = self.compiler.resolve_local(name) {
-            let arg = res.unwrap_or_else(|msg| {
-                self.error(msg);
+            let arg = res.unwrap_or_else(|message| {
+                self.error(message);
                 0
             });
 
             get_op = Op::GetLocal(arg);
             set_op = Op::SetLocal(arg);
         } else if let Some(res) = self.compiler.resolve_upvalue(name) {
-            let arg = res.unwrap_or_else(|msg| {
-                self.error(msg);
+            let arg = res.unwrap_or_else(|message| {
+                self.error(message);
                 0
             });
 
@@ -724,7 +724,7 @@ impl<'code> Parser<'code> {
             .compiler
             .locals
             .last()
-            .filter(|local| local.depth > self.compiler.scope_depth)
+            .filter(|local| local.depth > Some(self.compiler.scope_depth))
         {
             if local.is_captured {
                 self.emit_op(Op::CloseUpvalue);
@@ -753,7 +753,7 @@ impl<'code> Parser<'code> {
         if self.compiler.locals.len() == Compiler::MAX_LOCALS {
             self.error("Too many local variables in function.");
         } else {
-            let local = Local::new(token, -1);
+            let local = Local::new(token, None);
             self.compiler.locals.push(local);
         }
     }
@@ -1062,7 +1062,7 @@ pub struct Compiler<'code> {
     function: Function,
     function_type: FunctionType,
     locals: ArrayVec<Local<'code>, { Compiler::MAX_LOCALS }>,
-    scope_depth: i32,
+    scope_depth: u32,
 }
 
 impl Compiler<'_> {
@@ -1075,7 +1075,7 @@ impl Compiler<'_> {
             FunctionType::Method | FunctionType::Initializer => Token::synthetic("this"),
             _ => Token::synthetic(""),
         };
-        locals.push(Local::new(token, 0));
+        locals.push(Local::new(token, Some(0)));
 
         Self {
             enclosing: None,
@@ -1090,14 +1090,19 @@ impl Compiler<'_> {
         self.locals
             .iter()
             .rev()
-            .take_while(|local| local.depth == -1 || local.depth >= self.scope_depth)
+            .take_while(|local| {
+                local
+                    .depth
+                    .filter(|depth| depth < &self.scope_depth)
+                    .is_none()
+            })
             .any(|local| local.name.lexeme == name.lexeme)
     }
 
     fn mark_initialized(&mut self) {
         if self.scope_depth != 0 {
             let last = self.locals.last_mut().expect("non-empty locals");
-            last.depth = self.scope_depth;
+            last.depth = Some(self.scope_depth);
         }
     }
 
@@ -1108,8 +1113,9 @@ impl Compiler<'_> {
             .rev()
             .find(|(_, local)| local.name.lexeme == name.lexeme)
             .map(|(i, local)| {
-                (local.depth != -1)
-                    .then(|| i as u8)
+                local
+                    .depth
+                    .map(|_| i as u8)
                     .ok_or("Can't read local variable in its own initializer.")
             })
     }
@@ -1133,7 +1139,7 @@ impl Compiler<'_> {
     }
 
     fn add_upvalue(
-        upvalues: &mut Vec<FnUpvalue>,
+        upvalues: &mut Vec<FunctionUpvalue>,
         index: u8,
         is_local: bool,
     ) -> Result<u8, &'static str> {
@@ -1148,7 +1154,7 @@ impl Compiler<'_> {
         if upvalue_count == Compiler::MAX_LOCALS {
             Err("Too many closure variables in function.")
         } else {
-            let upvalue = FnUpvalue::new(index, is_local);
+            let upvalue = FunctionUpvalue::new(index, is_local);
             upvalues.push(upvalue);
 
             Ok(upvalue_count as u8)
@@ -1159,12 +1165,12 @@ impl Compiler<'_> {
 #[derive(Debug)]
 struct Local<'code> {
     name: Token<'code>,
-    depth: i32,
+    depth: Option<u32>,
     is_captured: bool,
 }
 
 impl<'code> Local<'code> {
-    fn new(name: Token<'code>, depth: i32) -> Self {
+    fn new(name: Token<'code>, depth: Option<u32>) -> Self {
         Self {
             name,
             depth,

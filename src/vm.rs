@@ -102,8 +102,8 @@ impl Vm {
                         Some(&value) => self.push(value),
                         None => {
                             let name = self.memory.deref(str_id).as_string().unwrap();
-                            let msg = format!("Undefined variable '{}'.", name);
-                            return Err(self.runtime_error(&msg));
+                            let message = format!("Undefined variable '{}'.", name);
+                            return Err(self.runtime_error(&message));
                         }
                     }
                 }
@@ -118,8 +118,8 @@ impl Vm {
                     if self.globals.insert(str_id, value).is_none() {
                         self.globals.remove(&str_id);
                         let name = self.memory.deref(str_id).as_string().unwrap();
-                        let msg = format!("Undefined variable '{}'.", name);
-                        return Err(self.runtime_error(&msg));
+                        let message = format!("Undefined variable '{}'.", name);
+                        return Err(self.runtime_error(&message));
                     }
                 }
                 Op::GetUpvalue(slot) => {

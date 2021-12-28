@@ -80,16 +80,16 @@ pub struct Function {
     pub arity: usize,
     pub chunk: Chunk,
     pub name: Option<HeapId>,
-    pub upvalues: Vec<FnUpvalue>,
+    pub upvalues: Vec<FunctionUpvalue>,
 }
 
 #[derive(Debug)]
-pub struct FnUpvalue {
+pub struct FunctionUpvalue {
     pub index: u8,
     pub is_local: bool,
 }
 
-impl FnUpvalue {
+impl FunctionUpvalue {
     pub fn new(index: u8, is_local: bool) -> Self {
         Self { index, is_local }
     }
