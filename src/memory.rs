@@ -80,7 +80,7 @@ impl Memory {
         self.remove_white_strings();
         self.sweep();
 
-        self.next_gc = self.objects_allocated * Memory::HEAP_GROW_FACTOR;
+        self.next_gc = self.objects_allocated * Self::HEAP_GROW_FACTOR;
     }
 
     fn trace_references(&mut self) {
@@ -96,7 +96,7 @@ impl Memory {
         match &obj_data {
             ObjData::Function(function) => {
                 if let Some(heap_id) = function.name {
-                    self.mark_object(heap_id)
+                    self.mark_object(heap_id);
                 }
 
                 function
@@ -114,7 +114,7 @@ impl Memory {
             }
             ObjData::Upvalue(upvalue) => {
                 if let Some(value) = upvalue.closed {
-                    self.mark_value(value)
+                    self.mark_value(value);
                 }
             }
             ObjData::Class(class) => {
@@ -136,10 +136,10 @@ impl Memory {
     }
 
     pub fn mark_table(&mut self, table: &FxHashMap<HeapId, Value>) {
-        table.iter().for_each(|(object, value)| {
+        for (object, value) in table.iter() {
             self.mark_object(*object);
             self.mark_value(*value);
-        })
+        }
     }
 
     fn remove_white_strings(&mut self) {

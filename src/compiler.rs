@@ -122,16 +122,16 @@ impl<'code> Parser<'code> {
 
         self.current = self.scanner.scan_token();
         if self.check(TokenType::Error) {
-            self.error_at_current(self.current.lexeme)
+            self.error_at_current(self.current.lexeme);
         }
     }
 
     fn error_at_current(&mut self, message: &str) {
-        self.error_at(self.current, message)
+        self.error_at(self.current, message);
     }
 
     fn error(&mut self, msg: &str) {
-        self.error_at(self.previous, msg)
+        self.error_at(self.previous, msg);
     }
 
     fn error_at(&mut self, token: Token, message: &str) {
@@ -154,14 +154,14 @@ impl<'code> Parser<'code> {
 
     fn consume(&mut self, kind: TokenType, message: &str) {
         if self.check(kind) {
-            self.advance()
+            self.advance();
         } else {
-            self.error_at_current(message)
+            self.error_at_current(message);
         }
     }
 
     fn expression(&mut self) {
-        self.parse_precedence(&Precedence::Assignment)
+        self.parse_precedence(&Precedence::Assignment);
     }
 
     fn number(&mut self) {
@@ -170,7 +170,7 @@ impl<'code> Parser<'code> {
             .lexeme
             .parse()
             .expect("parsed value to be a double");
-        self.emit_constant(Value::Number(value))
+        self.emit_constant(Value::Number(value));
     }
 
     fn super_(&mut self) {
@@ -220,11 +220,11 @@ impl<'code> Parser<'code> {
         let value = &lexeme[1..lexeme.len() - 1];
         let str_id = self.memory.intern(value);
 
-        self.emit_constant(Value::String(str_id))
+        self.emit_constant(Value::String(str_id));
     }
 
     fn variable(&mut self, can_assign: bool) {
-        self.named_variable(self.previous, can_assign)
+        self.named_variable(self.previous, can_assign);
     }
 
     fn and(&mut self) {
@@ -233,7 +233,7 @@ impl<'code> Parser<'code> {
         self.emit_op(Op::Pop);
         self.parse_precedence(&Precedence::And);
 
-        self.patch_jump(end_jump)
+        self.patch_jump(end_jump);
     }
 
     fn or(&mut self) {
@@ -244,7 +244,7 @@ impl<'code> Parser<'code> {
         self.emit_op(Op::Pop);
 
         self.parse_precedence(&Precedence::Or);
-        self.patch_jump(end_jump)
+        self.patch_jump(end_jump);
     }
 
     fn make_constant(&mut self, value: Value) -> u8 {
@@ -257,7 +257,7 @@ impl<'code> Parser<'code> {
 
     fn grouping(&mut self) {
         self.expression();
-        self.consume(TokenType::RightParen, "Expect ')' after expression.")
+        self.consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
     fn dot(&mut self, can_assign: bool) {
@@ -307,7 +307,7 @@ impl<'code> Parser<'code> {
         }
 
         if can_assign && self.matches(TokenType::Equal) {
-            self.error("Invalid assignment target.")
+            self.error("Invalid assignment target.");
         }
     }
 
@@ -549,11 +549,11 @@ impl<'code> Parser<'code> {
         if self.matches(TokenType::Class) {
             self.class_declaration();
         } else if self.matches(TokenType::Fun) {
-            self.fun_declaration()
+            self.fun_declaration();
         } else if self.matches(TokenType::Var) {
-            self.var_declaration()
+            self.var_declaration();
         } else {
-            self.statement()
+            self.statement();
         }
 
         if self.panic_mode {
@@ -563,21 +563,21 @@ impl<'code> Parser<'code> {
 
     fn statement(&mut self) {
         if self.matches(TokenType::Print) {
-            self.print_statement()
+            self.print_statement();
         } else if self.matches(TokenType::For) {
-            self.for_statement()
+            self.for_statement();
         } else if self.matches(TokenType::If) {
-            self.if_statement()
+            self.if_statement();
         } else if self.matches(TokenType::Return) {
-            self.return_statement()
+            self.return_statement();
         } else if self.matches(TokenType::While) {
-            self.while_statement()
+            self.while_statement();
         } else if self.matches(TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
             self.end_scope();
         } else {
-            self.expression_statement()
+            self.expression_statement();
         }
     }
 
@@ -706,7 +706,7 @@ impl<'code> Parser<'code> {
             self.declaration();
         }
 
-        self.consume(TokenType::RightBrace, "Expect '}' after block.")
+        self.consume(TokenType::RightBrace, "Expect '}' after block.");
     }
 
     fn check(&self, kind: TokenType) -> bool {
@@ -743,15 +743,15 @@ impl<'code> Parser<'code> {
         let prev = self.previous;
 
         if self.compiler.is_local_declared(prev) {
-            self.error("Already a variable with this name in this scope.")
+            self.error("Already a variable with this name in this scope.");
         } else {
-            self.add_local(prev)
+            self.add_local(prev);
         }
     }
 
     fn add_local(&mut self, token: Token<'code>) {
         if self.compiler.locals.len() == Compiler::MAX_LOCALS {
-            self.error("Too many local variables in function.")
+            self.error("Too many local variables in function.");
         } else {
             let local = Local::new(token, -1);
             self.compiler.locals.push(local);
@@ -772,9 +772,9 @@ impl<'code> Parser<'code> {
         self.emit_op(Op::Pop);
 
         if self.matches(TokenType::Else) {
-            self.statement()
+            self.statement();
         }
-        self.patch_jump(else_jump)
+        self.patch_jump(else_jump);
     }
 
     fn patch_jump(&mut self, offset: usize) {
@@ -814,9 +814,9 @@ impl<'code> Parser<'code> {
         let offset = self.current_chunk().code.len() - loop_start + 1;
 
         if let Ok(offset) = u16::try_from(offset) {
-            self.emit_op(Op::Loop(offset))
+            self.emit_op(Op::Loop(offset));
         } else {
-            self.error("Loop body too large.")
+            self.error("Loop body too large.");
         }
     }
 
@@ -1179,7 +1179,7 @@ struct ClassCompiler {
 }
 
 impl ClassCompiler {
-    fn new(enclosing: Option<Box<ClassCompiler>>) -> Self {
+    fn new(enclosing: Option<Box<Self>>) -> Self {
         Self {
             enclosing,
             has_superclass: false,

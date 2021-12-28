@@ -23,7 +23,7 @@ pub struct Vm {
 
 impl Vm {
     const FRAMES_MAX: usize = 64;
-    const STACK_MAX: usize = Vm::FRAMES_MAX * (u8::MAX as usize + 1);
+    const STACK_MAX: usize = Self::FRAMES_MAX * (u8::MAX as usize + 1);
 
     pub fn new() -> Self {
         let mut memory = Memory::new();
@@ -69,7 +69,7 @@ impl Vm {
                         (Value::String(a), Value::String(b)) => {
                             let str_a = self.memory.deref(a).as_string().unwrap();
                             let str_b = self.memory.deref(b).as_string().unwrap();
-                            let result = str_a.to_owned() + str_b;
+                            let result = str_a.clone() + str_b;
                             let result = self.intern(&result);
                             self.push(Value::String(result));
                         }
@@ -468,7 +468,7 @@ impl Vm {
             );
 
             Err(self.runtime_error(&message))
-        } else if self.frames.len() == Vm::FRAMES_MAX {
+        } else if self.frames.len() == Self::FRAMES_MAX {
             Err(self.runtime_error("Stack overflow."))
         } else {
             let frame = CallFrame::new(closure_id, self.stack.len() - arg_count - 1);
@@ -612,7 +612,7 @@ impl Vm {
             Value::Nil => println!("nil"),
             Value::Number(num) => println!("{}", num),
             Value::String(str_id) => {
-                println!("{}", self.memory.deref(str_id).as_string().unwrap())
+                println!("{}", self.memory.deref(str_id).as_string().unwrap());
             }
             Value::Function(fun_id) => {
                 let fn_name = self.memory.deref(fun_id).as_function().unwrap().name;
