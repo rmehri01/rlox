@@ -148,7 +148,7 @@ impl Memory {
     }
 
     fn sweep(&mut self) {
-        (0..self.heap.len()).for_each(|idx| {
+        for idx in 0..self.heap.len() {
             let object = &mut self.heap[idx];
 
             if !self.free_list.contains(&HeapId(idx)) {
@@ -158,7 +158,7 @@ impl Memory {
                     self.free(HeapId(idx));
                 }
             }
-        });
+        }
     }
 
     pub fn mark_value(&mut self, value: Value) {
