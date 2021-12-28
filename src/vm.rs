@@ -493,12 +493,15 @@ impl Vm {
         let mut prev_upvalue = None;
         let mut upvalue = self.open_upvalue;
 
-        // TODO: double lookup
-        while let Some(inner) = upvalue
-            .filter(|upvalue| self.memory.deref(*upvalue).as_upvalue().unwrap().location > location)
-        {
-            upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
-            prev_upvalue = Some(inner);
+        while let Some(inner) = upvalue {
+            let inner_upvalue = self.memory.deref(inner).as_upvalue().unwrap();
+
+            if inner_upvalue.location > location {
+                upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
+                prev_upvalue = Some(inner);
+            } else {
+                break;
+            }
         }
 
         if let Some(inner) = upvalue.filter(|upvalue| {
@@ -521,14 +524,16 @@ impl Vm {
     }
 
     fn close_upvalues(&mut self, last: usize) {
-        while let Some(upvalue) = self
-            .open_upvalue
-            .filter(|upvalue| self.memory.deref(*upvalue).as_upvalue().unwrap().location >= last)
-        {
+        while let Some(upvalue) = self.open_upvalue {
             let mut upvalue = self.memory.deref_mut(upvalue).as_upvalue_mut().unwrap();
-            let value = self.stack[upvalue.location];
-            upvalue.closed = Some(value);
-            self.open_upvalue = upvalue.next.take();
+
+            if upvalue.location >= last {
+                let value = self.stack[upvalue.location];
+                upvalue.closed = Some(value);
+                self.open_upvalue = upvalue.next.take();
+            } else {
+                break;
+            }
         }
     }
 
