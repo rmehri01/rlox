@@ -88,7 +88,6 @@ impl Memory {
         }
     }
 
-    // TODO: better way of doing this?
     fn blacken_object(&mut self, heap_id: HeapId) {
         let obj_data = mem::replace(&mut self.heap[heap_id.0].data, ObjData::None);
 
@@ -135,10 +134,10 @@ impl Memory {
     }
 
     pub fn mark_table(&mut self, table: &FxHashMap<HeapId, Value>) {
-        for (object, value) in table.iter() {
+        table.iter().for_each(|(object, value)| {
             self.mark_object(*object);
             self.mark_value(*value);
-        }
+        });
     }
 
     fn remove_white_strings(&mut self) {

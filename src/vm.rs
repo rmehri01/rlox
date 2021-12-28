@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{mem, time::Instant};
 
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
@@ -250,19 +250,11 @@ impl Vm {
                     let constant = self.current_chunk().read_constant(index);
 
                     if let Value::Function(fun_id) = constant {
-                        // TODO: double lookup?
-                        let upvalues = self
-                            .memory
-                            .deref(fun_id)
-                            .as_function()
-                            .unwrap()
-                            .upvalues
-                            .len();
+                        let function = self.memory.deref_mut(fun_id).as_function_mut().unwrap();
+                        let upvalues = mem::take(&mut function.upvalues);
                         let mut closure = Closure::new(fun_id);
 
-                        for upvalue in 0..upvalues {
-                            let upvalue =
-                                &self.memory.deref(fun_id).as_function().unwrap().upvalues[upvalue];
+                        upvalues.iter().for_each(|upvalue| {
                             let obj_upvalue = if upvalue.is_local {
                                 let location = self.current_frame().slot + upvalue.index as usize;
                                 self.capture_upvalue(location)
@@ -271,7 +263,13 @@ impl Vm {
                             };
 
                             closure.upvalues.push(obj_upvalue);
-                        }
+                        });
+
+                        self.memory
+                            .deref_mut(fun_id)
+                            .as_function_mut()
+                            .unwrap()
+                            .upvalues = upvalues;
 
                         let closure_id = self.alloc(ObjData::Closure(closure));
                         self.push(Value::Closure(closure_id));

@@ -1154,10 +1154,14 @@ impl Compiler<'_> {
         index: u8,
         is_local: bool,
     ) -> Result<u8, &'static str> {
-        for (i, upvalue) in upvalues.iter().enumerate() {
-            if upvalue.index == index && upvalue.is_local == is_local {
-                return Ok(i.try_into().unwrap());
-            }
+        let found_upvalue = upvalues
+            .iter()
+            .enumerate()
+            .find(|(_, upvalue)| upvalue.index == index && upvalue.is_local == is_local)
+            .map(|(i, _)| i as u8);
+
+        if let Some(i) = found_upvalue {
+            return Ok(i);
         }
 
         let upvalue_count = upvalues.len();
