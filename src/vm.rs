@@ -378,10 +378,11 @@ impl Vm {
                     let function_name = self.memory.deref(str_id).as_string().unwrap();
                     eprintln!(
                         "[line {}] in {}()",
-                        function.chunk.lines[line], function_name
+                        function.chunk.line_at(line),
+                        function_name
                     );
                 }
-                None => eprintln!("[line {}] in script", function.chunk.lines[line]),
+                None => eprintln!("[line {}] in script", function.chunk.line_at(line)),
             };
         });
 

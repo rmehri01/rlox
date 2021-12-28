@@ -65,7 +65,7 @@ pub enum Op {
 pub struct Chunk {
     pub code: Vec<Op>,
     pub constants: Vec<Value>,
-    pub lines: Vec<usize>,
+    lines: Vec<Run>,
 }
 
 impl Chunk {
@@ -83,7 +83,28 @@ impl Chunk {
 
     pub fn write(&mut self, op: Op, line: usize) {
         self.code.push(op);
-        self.lines.push(line);
+
+        if let Some(last) = self.lines.last_mut() {
+            if last.line == line {
+                last.count += 1;
+                return;
+            }
+        }
+
+        self.lines.push(Run::new(line, 1));
+    }
+
+    pub fn line_at(&self, index: usize) -> usize {
+        let mut sum = 0;
+
+        self.lines
+            .iter()
+            .find(|run| {
+                sum += run.count;
+                index < sum
+            })
+            .expect("index to be within the sum of the line count")
+            .line
     }
 
     pub fn read_constant(&self, index: u8) -> Value {
@@ -105,5 +126,17 @@ impl Chunk {
 
     pub fn last_index(&self) -> usize {
         self.code.len() - 1
+    }
+}
+
+#[derive(Debug)]
+struct Run {
+    line: usize,
+    count: usize,
+}
+
+impl Run {
+    fn new(line: usize, count: usize) -> Self {
+        Self { line, count }
     }
 }
