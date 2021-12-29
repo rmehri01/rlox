@@ -1,7 +1,6 @@
 use core::fmt;
 use std::ptr;
 
-use enum_as_inner::EnumAsInner;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -25,7 +24,7 @@ impl Object {
     }
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug)]
 pub enum ObjData {
     String(String),
     Function(Function),
@@ -155,4 +154,15 @@ impl BoundMethod {
     pub fn new(receiver: Value, method: HeapId) -> Self {
         Self { receiver, method }
     }
+}
+
+#[macro_export]
+macro_rules! cast {
+    ($target: expr, $pat: path) => {{
+        if let $pat(a) = $target {
+            a
+        } else {
+            panic!("Masmatched variant when cast to {}", stringify!($pat));
+        }
+    }};
 }

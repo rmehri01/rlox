@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
 
 use crate::{
+    cast,
     chunk::{Chunk, Op, Value},
     compiler::Parser,
     error::LoxError,
@@ -67,8 +68,8 @@ impl Vm {
                     let (b, a) = (self.pop(), self.pop());
                     match (a, b) {
                         (Value::String(a), Value::String(b)) => {
-                            let str_a = self.memory.deref(a).as_string().unwrap();
-                            let str_b = self.memory.deref(b).as_string().unwrap();
+                            let str_a = cast!(self.memory.deref(a), ObjData::String);
+                            let str_b = cast!(self.memory.deref(b), ObjData::String);
                             let result = str_a.clone() + str_b;
                             let result = self.intern(&result);
                             self.push(Value::String(result));
@@ -101,7 +102,7 @@ impl Vm {
                     match self.globals.get(&str_id) {
                         Some(&value) => self.push(value),
                         None => {
-                            let name = self.memory.deref(str_id).as_string().unwrap();
+                            let name = cast!(self.memory.deref(str_id), ObjData::String);
                             let message = format!("Undefined variable '{}'.", name);
                             return Err(self.runtime_error(&message));
                         }
@@ -117,7 +118,7 @@ impl Vm {
                     let value = self.peek(0);
                     if self.globals.insert(str_id, value).is_none() {
                         self.globals.remove(&str_id);
-                        let name = self.memory.deref(str_id).as_string().unwrap();
+                        let name = cast!(self.memory.deref(str_id), ObjData::String);
                         let message = format!("Undefined variable '{}'.", name);
                         return Err(self.runtime_error(&message));
                     }
@@ -126,7 +127,7 @@ impl Vm {
                     let value = {
                         let current_closure = self.current_closure();
                         let upvalue_id = current_closure.upvalues[slot as usize];
-                        let upvalue = self.memory.deref(upvalue_id).as_upvalue().unwrap();
+                        let upvalue = cast!(self.memory.deref(upvalue_id), ObjData::Upvalue);
 
                         match upvalue.closed {
                             Some(value) => value,
@@ -139,7 +140,7 @@ impl Vm {
                 Op::SetUpvalue(slot) => {
                     let value = self.peek(0);
                     let upvalue_id = self.current_closure().upvalues[slot as usize];
-                    let mut upvalue = self.memory.deref_mut(upvalue_id).as_upvalue_mut().unwrap();
+                    let mut upvalue = cast!(self.memory.deref_mut(upvalue_id), ObjData::Upvalue);
 
                     if upvalue.closed.is_none() {
                         self.stack[upvalue.location] = value;
@@ -150,7 +151,7 @@ impl Vm {
                 Op::GetProperty(index) => {
                     if let Value::Instance(instance_id) = self.peek(0) {
                         let name_id = self.current_chunk().read_string(index);
-                        let instance = self.memory.deref(instance_id).as_instance().unwrap();
+                        let instance = cast!(self.memory.deref(instance_id), ObjData::Instance);
                         let value = instance.fields.get(&name_id);
 
                         match value {
@@ -171,11 +172,7 @@ impl Vm {
                     if let Value::Instance(instance_id) = self.peek(1) {
                         let name = self.current_chunk().read_string(index);
                         let value = self.pop();
-                        let instance = self
-                            .memory
-                            .deref_mut(instance_id)
-                            .as_instance_mut()
-                            .unwrap();
+                        let instance = cast!(self.memory.deref_mut(instance_id), ObjData::Instance);
 
                         instance.fields.insert(name, value);
 
@@ -192,12 +189,9 @@ impl Vm {
                 }
                 Op::GetSuper(index) => {
                     let name = self.current_chunk().read_string(index);
+                    let superclass = cast!(self.pop(), Value::Class);
 
-                    if let Value::Class(superclass) = self.pop() {
-                        self.bind_method(superclass, name)?;
-                    } else {
-                        panic!("Tried to call super on a non-class.");
-                    }
+                    self.bind_method(superclass, name)?;
                 }
                 Op::Greater => self.binary_op(|a, b| a > b, Value::Bool)?,
                 Op::Less => self.binary_op(|a, b| a < b, Value::Bool)?,
@@ -239,43 +233,33 @@ impl Vm {
                 }
                 Op::SuperInvoke(index, arg_count) => {
                     let name = self.current_chunk().read_string(index);
+                    let superclass = cast!(self.pop(), Value::Class);
 
-                    if let Value::Class(superclass) = self.pop() {
-                        self.invoke_from_class(superclass, name, arg_count as usize)?;
-                    } else {
-                        panic!("Tried to super invoke on a non-class.");
-                    }
+                    self.invoke_from_class(superclass, name, arg_count as usize)?;
                 }
                 Op::Closure(index) => {
                     let constant = self.current_chunk().read_constant(index);
+                    let fun_id = cast!(constant, Value::Function);
 
-                    if let Value::Function(fun_id) = constant {
-                        let function = self.memory.deref_mut(fun_id).as_function_mut().unwrap();
-                        let upvalues = mem::take(&mut function.upvalues);
-                        let mut closure = Closure::new(fun_id);
+                    let function = cast!(self.memory.deref_mut(fun_id), ObjData::Function);
+                    let upvalues = mem::take(&mut function.upvalues);
+                    let mut closure = Closure::new(fun_id);
 
-                        upvalues.iter().for_each(|upvalue| {
-                            let obj_upvalue = if upvalue.is_local {
-                                let location = self.current_frame().slot + upvalue.index as usize;
-                                self.capture_upvalue(location)
-                            } else {
-                                self.current_closure().upvalues[upvalue.index as usize]
-                            };
+                    upvalues.iter().for_each(|upvalue| {
+                        let obj_upvalue = if upvalue.is_local {
+                            let location = self.current_frame().slot + upvalue.index as usize;
+                            self.capture_upvalue(location)
+                        } else {
+                            self.current_closure().upvalues[upvalue.index as usize]
+                        };
 
-                            closure.upvalues.push(obj_upvalue);
-                        });
+                        closure.upvalues.push(obj_upvalue);
+                    });
 
-                        self.memory
-                            .deref_mut(fun_id)
-                            .as_function_mut()
-                            .unwrap()
-                            .upvalues = upvalues;
+                    cast!(self.memory.deref_mut(fun_id), ObjData::Function).upvalues = upvalues;
 
-                        let closure_id = self.alloc(ObjData::Closure(closure));
-                        self.push(Value::Closure(closure_id));
-                    } else {
-                        panic!("Closure should wrap a function");
-                    }
+                    let closure_id = self.alloc(ObjData::Closure(closure));
+                    self.push(Value::Closure(closure_id));
                 }
                 Op::CloseUpvalue => {
                     self.close_upvalues(self.stack.len() - 1);
@@ -308,9 +292,9 @@ impl Vm {
                         (subclass, superclass)
                     {
                         let superclass =
-                            self.memory.deref_mut(superclass_id).as_class_mut().unwrap();
+                            cast!(self.memory.deref_mut(superclass_id), ObjData::Class);
                         let methods = superclass.methods.clone();
-                        let subclass = self.memory.deref_mut(subclass_id).as_class_mut().unwrap();
+                        let subclass = cast!(self.memory.deref_mut(subclass_id), ObjData::Class);
 
                         subclass.methods.extend(methods.iter());
 
@@ -367,13 +351,13 @@ impl Vm {
         eprintln!("{}", message);
 
         self.frames.iter().rev().for_each(|frame| {
-            let closure = self.memory.deref(frame.closure_id).as_closure().unwrap();
-            let function = self.memory.deref(closure.fun_id).as_function().unwrap();
+            let closure = cast!(self.memory.deref(frame.closure_id), ObjData::Closure);
+            let function = cast!(self.memory.deref(closure.fun_id), ObjData::Function);
             let line = frame.ip - 1;
 
             match function.name {
                 Some(str_id) => {
-                    let function_name = self.memory.deref(str_id).as_string().unwrap();
+                    let function_name = cast!(self.memory.deref(str_id), ObjData::String);
                     eprintln!(
                         "[line {}] in {}()",
                         function.chunk.line_at(line),
@@ -397,19 +381,20 @@ impl Vm {
 
     fn current_closure(&self) -> &Closure {
         let closure_id = self.current_frame().closure_id;
-        self.memory.deref(closure_id).as_closure().unwrap()
+        cast!(self.memory.deref(closure_id), ObjData::Closure)
     }
 
     fn current_chunk(&self) -> &Chunk {
         let closure = self.current_closure();
-        let function = self.memory.deref(closure.fun_id).as_function().unwrap();
+        let function = cast!(self.memory.deref(closure.fun_id), ObjData::Function);
+
         &function.chunk
     }
 
     fn call_value(&mut self, arg_count: usize) -> Result<(), LoxError> {
         match self.peek(arg_count) {
             Value::BoundMethod(bound_id) => {
-                let bound = self.memory.deref(bound_id).as_bound_method().unwrap();
+                let bound = cast!(self.memory.deref(bound_id), ObjData::BoundMethod);
                 let bound_method = bound.method;
                 let location = self.stack.len() - arg_count - 1;
 
@@ -423,13 +408,11 @@ impl Vm {
                 let location = self.stack.len() - arg_count - 1;
                 self.stack[location] = Value::Instance(instance_id);
 
-                let class = self.memory.deref(class_id).as_class().unwrap();
+                let class = cast!(self.memory.deref(class_id), ObjData::Class);
                 if let Some(&initializer) = class.methods.get(&self.init_string) {
-                    if let Value::Closure(closure_id) = initializer {
-                        self.call(closure_id, arg_count)
-                    } else {
-                        panic!("Initializer should be a closure")
-                    }
+                    let closure_id = cast!(initializer, Value::Closure);
+
+                    self.call(closure_id, arg_count)
                 } else if arg_count != 0 {
                     let message = format!("Expected 0 arguments but got {}.", arg_count);
                     Err(self.runtime_error(&message))
@@ -450,8 +433,8 @@ impl Vm {
     }
 
     fn call(&mut self, closure_id: HeapId, arg_count: usize) -> Result<(), LoxError> {
-        let closure = self.memory.deref(closure_id).as_closure().unwrap();
-        let function = self.memory.deref(closure.fun_id).as_function().unwrap();
+        let closure = cast!(self.memory.deref(closure_id), ObjData::Closure);
+        let function = cast!(self.memory.deref(closure.fun_id), ObjData::Function);
 
         if arg_count != function.arity {
             let message = format!(
@@ -476,15 +459,12 @@ impl Vm {
     }
 
     fn define_method(&mut self, name: HeapId) {
-        if let Value::Class(class) = self.peek(1) {
-            let method = self.peek(0);
-            let class = self.memory.deref_mut(class).as_class_mut().unwrap();
+        let class = cast!(self.peek(1), Value::Class);
+        let method = self.peek(0);
+        let class = cast!(self.memory.deref_mut(class), ObjData::Class);
 
-            class.methods.insert(name, method);
-            self.pop();
-        } else {
-            panic!("Cannot define a method on a non-class.");
-        }
+        class.methods.insert(name, method);
+        self.pop();
     }
 
     fn capture_upvalue(&mut self, location: usize) -> HeapId {
@@ -492,10 +472,10 @@ impl Vm {
         let mut upvalue = self.open_upvalue;
 
         while let Some(inner) = upvalue {
-            let inner_upvalue = self.memory.deref(inner).as_upvalue().unwrap();
+            let inner_upvalue = cast!(self.memory.deref(inner), ObjData::Upvalue);
 
             if inner_upvalue.location > location {
-                upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
+                upvalue = cast!(self.memory.deref(inner), ObjData::Upvalue).next;
                 prev_upvalue = Some(inner);
             } else {
                 break;
@@ -503,7 +483,7 @@ impl Vm {
         }
 
         if let Some(inner) = upvalue.filter(|upvalue| {
-            self.memory.deref(*upvalue).as_upvalue().unwrap().location == location
+            cast!(self.memory.deref(*upvalue), ObjData::Upvalue).location == location
         }) {
             return inner;
         }
@@ -513,7 +493,7 @@ impl Vm {
         let upvalue_id = self.alloc(ObjData::Upvalue(created_upvalue));
 
         if let Some(inner) = prev_upvalue {
-            self.memory.deref_mut(inner).as_upvalue_mut().unwrap().next = Some(upvalue_id);
+            cast!(self.memory.deref_mut(inner), ObjData::Upvalue).next = Some(upvalue_id);
         } else {
             self.open_upvalue = Some(upvalue_id);
         }
@@ -523,7 +503,7 @@ impl Vm {
 
     fn close_upvalues(&mut self, last: usize) {
         while let Some(upvalue) = self.open_upvalue {
-            let mut upvalue = self.memory.deref_mut(upvalue).as_upvalue_mut().unwrap();
+            let mut upvalue = cast!(self.memory.deref_mut(upvalue), ObjData::Upvalue);
 
             if upvalue.location >= last {
                 let value = self.stack[upvalue.location];
@@ -570,33 +550,30 @@ impl Vm {
         let mut upvalue = self.open_upvalue;
         while let Some(inner) = upvalue {
             self.memory.mark_object(inner);
-            upvalue = self.memory.deref(inner).as_upvalue().unwrap().next;
+            upvalue = cast!(self.memory.deref(inner), ObjData::Upvalue).next;
         }
 
         self.memory.mark_object(self.init_string);
     }
 
     fn bind_method(&mut self, class: HeapId, name_id: HeapId) -> Result<(), LoxError> {
-        let class = self.memory.deref(class).as_class().unwrap();
+        let class = cast!(self.memory.deref(class), ObjData::Class);
 
         match class.methods.get(&name_id) {
             Some(method_val) => {
                 let receiver = self.peek(0);
+                let method = cast!(method_val, Value::Closure);
 
-                if let Value::Closure(method) = method_val {
-                    let bound = BoundMethod::new(receiver, *method);
-                    let bound_id = self.alloc(ObjData::BoundMethod(bound));
+                let bound = BoundMethod::new(receiver, *method);
+                let bound_id = self.alloc(ObjData::BoundMethod(bound));
 
-                    self.pop();
-                    self.push(Value::BoundMethod(bound_id));
+                self.pop();
+                self.push(Value::BoundMethod(bound_id));
 
-                    Ok(())
-                } else {
-                    panic!("Expected method to be a closure.");
-                }
+                Ok(())
             }
             None => {
-                let name = self.memory.deref(name_id).as_string().unwrap();
+                let name = cast!(self.memory.deref(name_id), ObjData::String);
                 let message = format!("Undefined property '{}'.", name);
                 Err(self.runtime_error(&message))
             }
@@ -609,39 +586,34 @@ impl Vm {
             Value::Nil => println!("nil"),
             Value::Number(num) => println!("{}", num),
             Value::String(str_id) => {
-                println!("{}", self.memory.deref(str_id).as_string().unwrap());
+                println!("{}", cast!(self.memory.deref(str_id), ObjData::String));
             }
             Value::Function(fun_id) => {
-                let fn_name = self.memory.deref(fun_id).as_function().unwrap().name;
+                let fn_name = cast!(self.memory.deref(fun_id), ObjData::Function).name;
                 match fn_name {
                     Some(str_id) => {
-                        println!("<fn {}>", self.memory.deref(str_id).as_string().unwrap());
+                        println!("<fn {}>", cast!(self.memory.deref(str_id), ObjData::String));
                     }
                     None => panic!("Expected function name"),
                 }
             }
             Value::NativeFunction(_) => println!("<native fn>"),
             Value::Closure(closure_id) => {
-                let fun_id = self.memory.deref(closure_id).as_closure().unwrap().fun_id;
+                let fun_id = cast!(self.memory.deref(closure_id), ObjData::Closure).fun_id;
                 self.display_value(Value::Function(fun_id));
             }
             Value::Class(class_id) => {
-                let name_id = self.memory.deref(class_id).as_class().unwrap().name;
+                let name_id = cast!(self.memory.deref(class_id), ObjData::Class).name;
                 self.display_value(Value::String(name_id));
             }
             Value::Instance(instance_id) => {
-                let class_id = self.memory.deref(instance_id).as_instance().unwrap().class;
-                let name_id = self.memory.deref(class_id).as_class().unwrap().name;
-                let class_name = self.memory.deref(name_id).as_string().unwrap();
+                let class_id = cast!(self.memory.deref(instance_id), ObjData::Instance).class;
+                let name_id = cast!(self.memory.deref(class_id), ObjData::Class).name;
+                let class_name = cast!(self.memory.deref(name_id), ObjData::String);
                 println!("{} instance", class_name);
             }
             Value::BoundMethod(bound_id) => {
-                let closure_id = self
-                    .memory
-                    .deref(bound_id)
-                    .as_bound_method()
-                    .unwrap()
-                    .method;
+                let closure_id = cast!(self.memory.deref(bound_id), ObjData::BoundMethod).method;
                 self.display_value(Value::Closure(closure_id));
             }
         }
@@ -651,7 +623,7 @@ impl Vm {
         let receiver = self.peek(arg_count);
         match receiver {
             Value::Instance(instance_id) => {
-                let instance = self.memory.deref(instance_id).as_instance().unwrap();
+                let instance = cast!(self.memory.deref(instance_id), ObjData::Instance);
 
                 match instance.fields.get(&name) {
                     Some(field) => {
@@ -675,16 +647,14 @@ impl Vm {
         name_id: HeapId,
         arg_count: usize,
     ) -> Result<(), LoxError> {
-        let class = self.memory.deref(class).as_class().unwrap();
+        let class = cast!(self.memory.deref(class), ObjData::Class);
 
         if let Some(&method) = class.methods.get(&name_id) {
-            if let Value::Closure(closure) = method {
-                self.call(closure, arg_count)
-            } else {
-                panic!("Got method that is not closure!")
-            }
+            let closure = cast!(method, Value::Closure);
+
+            self.call(closure, arg_count)
         } else {
-            let name = self.memory.deref(name_id).as_string().unwrap();
+            let name = cast!(self.memory.deref(name_id), ObjData::String);
             let message = format!("Undefined property '{}'.", name);
             Err(self.runtime_error(&message))
         }

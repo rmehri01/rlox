@@ -1,4 +1,4 @@
-use crate::{memory::HeapId, object::NativeFunction};
+use crate::{cast, memory::HeapId, object::NativeFunction};
 
 #[derive(Debug)]
 pub struct Chunk {
@@ -56,11 +56,7 @@ impl Chunk {
     }
 
     pub fn read_string(&self, index: u8) -> HeapId {
-        if let Value::String(str_id) = self.read_constant(index) {
-            str_id
-        } else {
-            panic!("Constant is not string.");
-        }
+        cast!(self.read_constant(index), Value::String)
     }
 
     pub fn last_index(&self) -> usize {
