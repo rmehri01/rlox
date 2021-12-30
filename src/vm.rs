@@ -1,4 +1,4 @@
-use std::{mem, time::Instant};
+use std::{cmp::Ordering, mem, time::Instant};
 
 use arrayvec::ArrayVec;
 use rustc_hash::FxHashMap;
@@ -573,36 +573,34 @@ impl Vm {
 
     fn capture_upvalue(&mut self, location: usize) -> HeapId {
         let mut prev_upvalue = None;
-        let mut upvalue = self.open_upvalue;
+        let mut curr_upvalue = self.open_upvalue;
 
-        while let Some(inner) = upvalue {
-            let inner_upvalue = cast!(self.memory.deref(inner), ObjData::Upvalue);
+        while let Some(upvalue_id) = curr_upvalue {
+            let upvalue = cast!(self.memory.deref(upvalue_id), ObjData::Upvalue);
 
-            if inner_upvalue.location > location {
-                upvalue = cast!(self.memory.deref(inner), ObjData::Upvalue).next;
-                prev_upvalue = Some(inner);
-            } else {
-                break;
+            match upvalue.location.cmp(&location) {
+                Ordering::Less => break,
+                Ordering::Equal => return upvalue_id,
+                Ordering::Greater => {
+                    curr_upvalue = upvalue.next;
+                    prev_upvalue = Some(upvalue_id);
+                }
             }
         }
 
-        if let Some(inner) = upvalue.filter(|upvalue| {
-            cast!(self.memory.deref(*upvalue), ObjData::Upvalue).location == location
-        }) {
-            return inner;
-        }
-
         let mut created_upvalue = Upvalue::new(location);
-        created_upvalue.next = upvalue;
-        let upvalue_id = self.alloc(ObjData::Upvalue(created_upvalue));
+        created_upvalue.next = curr_upvalue;
 
-        if let Some(inner) = prev_upvalue {
-            cast!(self.memory.deref_mut(inner), ObjData::Upvalue).next = Some(upvalue_id);
+        let created_id = self.alloc(ObjData::Upvalue(created_upvalue));
+
+        if let Some(upvalue_id) = prev_upvalue {
+            let upvalue = cast!(self.memory.deref_mut(upvalue_id), ObjData::Upvalue);
+            upvalue.next = Some(created_id);
         } else {
-            self.open_upvalue = Some(upvalue_id);
+            self.open_upvalue = Some(created_id);
         }
 
-        upvalue_id
+        created_id
     }
 
     fn close_upvalues(&mut self, last: usize) {
@@ -693,7 +691,9 @@ impl Vm {
                 println!("{}", cast!(self.memory.deref(str_id), ObjData::String));
             }
             Value::Function(fun_id) => {
-                let fn_name = cast!(self.memory.deref(fun_id), ObjData::Function).name;
+                let function = cast!(self.memory.deref(fun_id), ObjData::Function);
+                let fn_name = function.name;
+
                 match fn_name {
                     Some(str_id) => {
                         println!("<fn {}>", cast!(self.memory.deref(str_id), ObjData::String));
@@ -703,21 +703,31 @@ impl Vm {
             }
             Value::NativeFunction(_) => println!("<native fn>"),
             Value::Closure(closure_id) => {
-                let fun_id = cast!(self.memory.deref(closure_id), ObjData::Closure).fun_id;
+                let closure = cast!(self.memory.deref(closure_id), ObjData::Closure);
+                let fun_id = closure.fun_id;
+
                 self.display_value(Value::Function(fun_id));
             }
             Value::Class(class_id) => {
-                let name_id = cast!(self.memory.deref(class_id), ObjData::Class).name;
+                let class = cast!(self.memory.deref(class_id), ObjData::Class);
+                let name_id = class.name;
+
                 self.display_value(Value::String(name_id));
             }
             Value::Instance(instance_id) => {
-                let class_id = cast!(self.memory.deref(instance_id), ObjData::Instance).class;
-                let name_id = cast!(self.memory.deref(class_id), ObjData::Class).name;
+                let instance = cast!(self.memory.deref(instance_id), ObjData::Instance);
+                let class_id = instance.class;
+
+                let class = cast!(self.memory.deref(class_id), ObjData::Class);
+                let name_id = class.name;
                 let class_name = cast!(self.memory.deref(name_id), ObjData::String);
+
                 println!("{} instance", class_name);
             }
             Value::BoundMethod(bound_id) => {
-                let closure_id = cast!(self.memory.deref(bound_id), ObjData::BoundMethod).method;
+                let bound_method = cast!(self.memory.deref(bound_id), ObjData::BoundMethod);
+                let closure_id = bound_method.method;
+
                 self.display_value(Value::Closure(closure_id));
             }
         }
