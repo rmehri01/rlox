@@ -435,10 +435,14 @@ impl Vm {
     }
 
     fn read_op(&mut self) -> Op {
-        let frame = self.current_frame();
-        let op = self.current_chunk().read(frame.ip);
-        self.current_frame_mut().ip += 1;
-        op
+        let frame = self.current_frame_mut();
+        let fun_id = frame.fun_id;
+        let ip = frame.ip;
+
+        frame.ip += 1;
+        cast!(self.memory.deref(fun_id), ObjData::Function)
+            .chunk
+            .read(ip)
     }
 
     fn peek(&self, distance: usize) -> Value {
@@ -484,8 +488,8 @@ impl Vm {
     }
 
     fn current_chunk(&self) -> &Chunk {
-        let closure = self.current_closure();
-        let function = cast!(self.memory.deref(closure.fun_id), ObjData::Function);
+        let fun_id = self.current_frame().fun_id;
+        let function = cast!(self.memory.deref(fun_id), ObjData::Function);
 
         &function.chunk
     }
@@ -545,7 +549,8 @@ impl Vm {
         } else if self.frames.len() == Self::FRAMES_MAX {
             Err(self.runtime_error("Stack overflow."))
         } else {
-            let frame = CallFrame::new(closure_id, self.stack.len() - arg_count - 1);
+            let frame =
+                CallFrame::new(closure_id, closure.fun_id, self.stack.len() - arg_count - 1);
             self.frames.push(frame);
 
             Ok(())
@@ -763,14 +768,16 @@ impl Vm {
 #[derive(Debug)]
 struct CallFrame {
     closure_id: HeapId,
+    fun_id: HeapId,
     ip: usize,
     slot: usize,
 }
 
 impl CallFrame {
-    fn new(closure_id: HeapId, slot: usize) -> Self {
+    fn new(closure_id: HeapId, fun_id: HeapId, slot: usize) -> Self {
         Self {
             closure_id,
+            fun_id,
             ip: 0,
             slot,
         }
