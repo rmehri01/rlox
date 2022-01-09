@@ -1,4 +1,4 @@
-use std::mem;
+use std::{collections::LinkedList, mem};
 
 use arrayvec::ArrayVec;
 
@@ -14,7 +14,7 @@ pub struct Parser<'code> {
     scanner: Scanner<'code>,
     memory: &'code mut Memory,
     compiler: Compiler<'code>,
-    current_class: Option<Box<ClassCompiler>>,
+    classes: LinkedList<ClassCompiler>,
     current: Token<'code>,
     previous: Token<'code>,
     had_error: bool,
@@ -27,7 +27,7 @@ impl<'code> Parser<'code> {
             scanner: Scanner::new(code),
             memory,
             compiler: Compiler::new(None, FunctionType::Script),
-            current_class: None,
+            classes: LinkedList::new(),
             current: Token::synthetic(""),
             previous: Token::synthetic(""),
             had_error: false,
@@ -76,7 +76,7 @@ impl<'code> Parser<'code> {
         self.emit_op(Op::Class(name_constant));
         self.define_variable(name_constant);
 
-        let mut class_compiler = ClassCompiler::new(self.current_class.take());
+        let mut class_compiler = ClassCompiler::new();
 
         if self.matches(TokenType::Less) {
             self.consume(TokenType::Identifier, "Expect superclass name.");
@@ -95,7 +95,7 @@ impl<'code> Parser<'code> {
             class_compiler.has_superclass = true;
         }
 
-        self.current_class = Some(Box::new(class_compiler));
+        self.classes.push_front(class_compiler);
 
         self.named_variable(class_name, false);
         self.consume(TokenType::LeftBrace, "Expect '{' before class body.");
@@ -107,12 +107,11 @@ impl<'code> Parser<'code> {
         self.consume(TokenType::RightBrace, "Expect '}' after class body.");
 
         self.emit_op(Op::Pop);
-        if self.current_class.as_ref().unwrap().has_superclass {
+        if self.classes.front().unwrap().has_superclass {
             self.end_scope();
         }
-        if let Some(class_compiler) = self.current_class.take() {
-            self.current_class = class_compiler.enclosing;
-        }
+
+        self.classes.pop_front();
     }
 
     fn fun_declaration(&mut self) {
@@ -610,7 +609,7 @@ impl<'code> Parser<'code> {
     }
 
     fn super_(&mut self) {
-        if let Some(current_class) = &self.current_class {
+        if let Some(current_class) = self.classes.front() {
             if !current_class.has_superclass {
                 self.error("Can't use 'super' in a class with no superclass.");
             }
@@ -635,7 +634,7 @@ impl<'code> Parser<'code> {
     }
 
     fn this(&mut self) {
-        if self.current_class.is_none() {
+        if self.classes.is_empty() {
             self.error("Can't use 'this' outside of a class.");
         } else {
             self.variable(false);
@@ -1054,14 +1053,12 @@ impl<'code> Local<'code> {
 }
 
 struct ClassCompiler {
-    pub enclosing: Option<Box<ClassCompiler>>,
     pub has_superclass: bool,
 }
 
 impl ClassCompiler {
-    fn new(enclosing: Option<Box<Self>>) -> Self {
+    fn new() -> Self {
         Self {
-            enclosing,
             has_superclass: false,
         }
     }
