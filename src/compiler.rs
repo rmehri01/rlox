@@ -994,7 +994,7 @@ impl<'code> Parser<'code> {
     }
 }
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, Eq, PartialOrd)]
 enum Precedence {
     None,
     Assignment, // =
@@ -1027,7 +1027,7 @@ impl Precedence {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum FunctionType {
     Function,
     Initializer,
