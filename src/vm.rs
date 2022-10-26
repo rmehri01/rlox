@@ -164,7 +164,7 @@ impl Vm {
             .map(|value| self.stack.push(*value))
             .ok_or_else(|| {
                 let name = cast!(self.memory.deref(str_id), ObjData::String);
-                let message = format!("Undefined variable '{}'.", name);
+                let message = format!("Undefined variable '{name}'.");
                 self.runtime_error(&message)
             })
     }
@@ -187,7 +187,7 @@ impl Vm {
             .ok_or_else(|| {
                 self.globals.remove(&str_id);
                 let name = cast!(self.memory.deref(str_id), ObjData::String);
-                let message = format!("Undefined variable '{}'.", name);
+                let message = format!("Undefined variable '{name}'.");
                 self.runtime_error(&message)
             })
     }
@@ -451,7 +451,7 @@ impl Vm {
     }
 
     fn runtime_error(&self, message: &str) -> LoxError {
-        eprintln!("{}", message);
+        eprintln!("{message}");
 
         self.frames.iter().rev().for_each(|frame| {
             let closure = cast!(self.memory.deref(frame.closure_id), ObjData::Closure);
@@ -517,7 +517,7 @@ impl Vm {
 
                     self.call(closure_id, arg_count)
                 } else if arg_count != 0 {
-                    let message = format!("Expected 0 arguments but got {}.", arg_count);
+                    let message = format!("Expected 0 arguments but got {arg_count}.");
                     Err(self.runtime_error(&message))
                 } else {
                     Ok(())
@@ -540,10 +540,7 @@ impl Vm {
         let function = cast!(self.memory.deref(closure.fun_id), ObjData::Function);
 
         if arg_count != function.arity {
-            let message = format!(
-                "Expected {} arguments but got {}.",
-                function.arity, arg_count
-            );
+            let message = format!("Expected {} arguments but got {arg_count}.", function.arity);
 
             Err(self.runtime_error(&message))
         } else if self.frames.len() == Self::FRAMES_MAX {
@@ -676,7 +673,7 @@ impl Vm {
             }
             None => {
                 let name = cast!(self.memory.deref(name_id), ObjData::String);
-                let message = format!("Undefined property '{}'.", name);
+                let message = format!("Undefined property '{name}'.");
                 Err(self.runtime_error(&message))
             }
         }
@@ -684,9 +681,9 @@ impl Vm {
 
     fn display_value(&self, value: Value) {
         match value {
-            Value::Bool(bool) => println!("{}", bool),
+            Value::Bool(bool) => println!("{bool}"),
             Value::Nil => println!("nil"),
-            Value::Number(num) => println!("{}", num),
+            Value::Number(num) => println!("{num}"),
             Value::String(str_id) => {
                 println!("{}", cast!(self.memory.deref(str_id), ObjData::String));
             }
@@ -722,7 +719,7 @@ impl Vm {
                 let name_id = class.name;
                 let class_name = cast!(self.memory.deref(name_id), ObjData::String);
 
-                println!("{} instance", class_name);
+                println!("{class_name} instance");
             }
             Value::BoundMethod(bound_id) => {
                 let bound_method = cast!(self.memory.deref(bound_id), ObjData::BoundMethod);
@@ -769,7 +766,7 @@ impl Vm {
             self.call(closure, arg_count)
         } else {
             let name = cast!(self.memory.deref(name_id), ObjData::String);
-            let message = format!("Undefined property '{}'.", name);
+            let message = format!("Undefined property '{name}'.");
             Err(self.runtime_error(&message))
         }
     }

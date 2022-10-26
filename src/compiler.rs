@@ -965,7 +965,7 @@ impl<'code> Parser<'code> {
             _ => eprint!(" at '{}'", token.lexeme),
         }
 
-        eprintln!(": {}", message);
+        eprintln!(": {message}");
         self.had_error = true;
     }
 

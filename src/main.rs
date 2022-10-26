@@ -4,7 +4,6 @@
     clippy::semicolon_if_nothing_returned
 )]
 #![forbid(unsafe_code)]
-#![feature(map_first_last)]
 
 use std::{
     env, fs,
@@ -58,7 +57,7 @@ fn run_file(vm: &mut Vm, path: &str) {
     let code = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) => {
-            eprint!("Unable to read file {}: {}", path, error);
+            eprint!("Unable to read file {path}: {error}");
             process::exit(74);
         }
     };
