@@ -211,7 +211,7 @@ impl Vm {
     fn op_set_upvalue(&mut self, slot: u8) -> Result<(), LoxError> {
         let value = self.peek(0);
         let upvalue_id = self.current_closure().upvalues[slot as usize];
-        let mut upvalue = cast!(self.memory.deref_mut(upvalue_id), ObjData::Upvalue);
+        let upvalue = cast!(self.memory.deref_mut(upvalue_id), ObjData::Upvalue);
 
         if upvalue.closed.is_none() {
             self.stack[upvalue.location] = value;
@@ -602,7 +602,7 @@ impl Vm {
 
     fn close_upvalues(&mut self, last: usize) {
         while let Some(upvalue) = self.open_upvalue {
-            let mut upvalue = cast!(self.memory.deref_mut(upvalue), ObjData::Upvalue);
+            let upvalue = cast!(self.memory.deref_mut(upvalue), ObjData::Upvalue);
 
             if upvalue.location >= last {
                 let value = self.stack[upvalue.location];
